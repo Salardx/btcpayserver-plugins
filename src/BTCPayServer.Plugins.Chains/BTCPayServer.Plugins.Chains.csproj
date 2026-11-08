@@ -9,7 +9,7 @@
     <RootNamespace>BTCPayServer.Plugins.Chains</RootNamespace>
     <Description>Shared watch-only payment services of the Payment Watcher plugins: address pools, listener, payment recording, store and server pages.</Description>
     <Version>0.1.0</Version>
-    <Authors>Salar Khosravi</Authors>
+    <Authors>Salardx</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

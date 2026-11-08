@@ -10,7 +10,7 @@
     <Product>Neo Payment Watcher</Product>
     <Description>Accept GAS on Neo N3 and Neo X straight to your own wallet. Watch-only: no node, no keys, no custody.</Description>
     <Version>0.1.0</Version>
-    <Authors>Salar Khosravi</Authors>
+    <Authors>Salardx</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
     <PreserveCompilationContext>false</PreserveCompilationContext>
