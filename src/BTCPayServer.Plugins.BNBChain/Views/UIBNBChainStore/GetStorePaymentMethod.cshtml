@@ -1,0 +1,116 @@
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.Chains.Payments
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Microsoft.AspNetCore.Routing
+@model BTCPayServer.Plugins.Chains.Controllers.EditChainPaymentMethodViewModel
+@{
+    var paymentMethodId = Context.GetRouteValue("paymentMethodId")?.ToString();
+    ViewData.SetLayoutModel(new LayoutModel(Model.PluginNavKey, $"{Model.DisplayName} payment settings") { SubMenuItemId = paymentMethodId }
+        .SetCategory(WellKnownCategories.Store));
+}
+<h3 class="mb-3">@Model.DisplayName payment settings</h3>
+<div class="row">
+    <div class="col-md-6">
+        <div asp-validation-summary="All"></div>
+    </div>
+</div>
+<partial name="_StatusMessage" />
+<div class="row">
+    <div class="col-md-8">
+        <p class="mb-0">
+            Payments go straight to these @Model.ChainDisplayName addresses, which only you control. Each open invoice reserves one address until it is paid or expires, so list several.
+        </p>
+        <form method="post"
+              asp-route-storeId="@Context.GetRouteValue("storeId")"
+              asp-route-paymentMethodId="@Context.GetRouteValue("paymentMethodId")"
+              class="mt-4" enctype="multipart/form-data">
+            <input type="hidden" name="command" value="add-addresses" />
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <input asp-for="Address" type="text" class="form-control" placeholder="@Model.AddressPlaceholder" style="flex: 1 1 14rem">
+                <button type="submit" role="button" class="btn btn-primary text-nowrap flex-grow-1 flex-sm-grow-0">Add address(es)</button>
+            </div>
+            <span asp-validation-for="Address" class="text-danger"></span>
+            <div class="form-text">Several addresses can be separated by commas or new lines.</div>
+        </form>
+        @if (Model.Addresses.Any())
+        {
+            <table class="table table-hover table-responsive-md">
+                <thead>
+                <tr>
+                    <th>Address</th>
+                    <th><span data-bs-toggle="tooltip" data-bs-placement="top" title="An address is reserved while an invoice using it can still be paid.">Free or reserved? <vc:icon symbol="info" /></span></th>
+                    <th class="actions-col" permission="@Policies.CanModifyStoreSettings">Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var address in Model.Addresses)
+                {
+                    <tr>
+                        <td class="text-break">@address.Value</td>
+                        <td class="text-center">
+                            <span class="me-2 btcpay-status btcpay-status--@(address.Available ? "enabled" : "disabled")"></span>
+                        </td>
+                        <td class="actions-col" permission="@Policies.CanModifyStoreSettings">
+                            <form method="post" asp-action="DeleteAddress"
+                                  asp-route-storeId="@Context.GetRouteValue("storeId")"
+                                  asp-route-paymentMethodId="@Context.GetRouteValue("paymentMethodId")"
+                                  asp-route-address="@address.Value"
+                                  enctype="multipart/form-data">
+                                <input class="btn btn-link p-0" type="submit" value="Remove" />
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <div class="alert alert-warning" role="alert">
+                Keep these addresses for this store only. A transfer from anywhere else lands on whichever invoice holds the address at that moment.
+            </div>
+        }
+        else
+        {
+            <br />
+            <div class="alert alert-info">Add at least one @Model.ChainDisplayName address before enabling this payment method.</div>
+        }
+        <div class="alert @(Model.NodeAvailable ? "alert-success" : "alert-secondary")" role="alert">
+            @if (Model.NodeAvailable)
+            {
+                <text>Node connected. Last block scanned: @Model.LatestBlockScanned, chain tip: @Model.LatestBlockOnNode.</text>
+            }
+            else if (Model.NodeError is not null)
+            {
+                <text>Node problem: @Model.NodeError</text>
+            }
+            else
+            {
+                <text>The chain is not being scanned yet. It starts within a minute of the first address being added.</text>
+            }
+        </div>
+        <form method="post"
+              asp-route-storeId="@Context.GetRouteValue("storeId")"
+              asp-route-paymentMethodId="@Context.GetRouteValue("paymentMethodId")" class="mt-4" enctype="multipart/form-data">
+            <div class="d-flex mb-3">
+                <input asp-for="Enabled" type="checkbox" class="btcpay-toggle me-3" />
+                <label asp-for="Enabled" class="form-check-label"></label>
+                <span asp-validation-for="Enabled" class="text-danger"></span>
+            </div>
+            <div class="form-group mb-3">
+                <label asp-for="PaymentLinkFormat" class="form-label">Payment link format</label>
+                <select asp-for="PaymentLinkFormat" class="form-select">
+                    <option value="@((int)PaymentLinkFormat.Standard)">@(Model.IsEvm ? "EIP-681 link (prefills the amount in wallets that support it)" : "NEP-9 link (prefills the amount in wallets that support it)")</option>
+                    <option value="@((int)PaymentLinkFormat.AddressOnly)">Address only (every wallet can scan it; the customer types the amount)</option>
+                </select>
+                <span asp-validation-for="PaymentLinkFormat" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary" id="SaveButton">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section PageFootContent {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+}

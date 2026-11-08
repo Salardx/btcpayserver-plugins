@@ -1,0 +1,14 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.Chains
+@using BTCPayServer.Plugins.Neo
+@inject ChainPluginContext<NeoPlugin> Plugin
+@{
+    var activePage = ViewData.TryGetValue("ActivePage", out var page) ? page?.ToString() : null;
+}
+@foreach (var chain in Plugin.Chains)
+{
+    <li permission="@Policies.CanModifyServerSettings">
+        <a class="dropdown-item @(activePage == $"{Plugin.PluginId}-{chain.Id}" ? "active" : "")"
+           asp-controller="UINeoServer" asp-action="GetServerConfig" asp-route-chainId="@chain.Id">@chain.DisplayName</a>
+    </li>
+}

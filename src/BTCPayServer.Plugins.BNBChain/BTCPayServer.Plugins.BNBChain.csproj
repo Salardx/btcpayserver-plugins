@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>BTCPayServer.Plugins.BNBChain</RootNamespace>
+    <Product>BNB Chain Payment Watcher</Product>
+    <Description>Accept BNB, USDT and USDC on BNB Smart Chain straight to your own wallet. Watch-only: no node, no keys, no custody.</Description>
+    <Version>0.1.0</Version>
+    <Authors>Salar Khosravi</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\bnb.svg" LogicalName="BTCPayServer.Plugins.BNBChain.bnb.svg" />
+    <ProjectReference Include="..\BTCPayServer.Plugins.Chains\BTCPayServer.Plugins.Chains.csproj" />
+    <!-- Referencing BTCPay Server must not copy any of its artifacts into the published plugin. -->
+    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
+      <Properties>StaticWebAssetsEnabled=false</Properties>
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BTCPayServer.Plugins.Tests" />
+  </ItemGroup>
+
+  <!-- BTCPay Server's own assemblies arrive transitively through the shared core; the host provides them, so they stay out of the package. -->
+  <Target Name="StripBTCPayServerAssemblies" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="$([System.String]::Copy('%(Filename)').StartsWith('BTCPayServer.')) And !$([System.String]::Copy('%(Filename)').StartsWith('BTCPayServer.Plugins.'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

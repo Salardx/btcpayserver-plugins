@@ -1,0 +1,56 @@
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.Chains
+@using BTCPayServer.Plugins.Chains.Payments
+@using BTCPayServer.Plugins.Chains.Services
+@using BTCPayServer.Plugins.Neo
+@using BTCPayServer.Services.Invoices
+@inject IScopeProvider ScopeProvider
+@inject ChainPluginContext<NeoPlugin> Plugin
+@inject ChainRpcProvider<NeoPlugin> RpcProvider
+@inject PaymentMethodHandlerDictionary Handlers
+@{
+    var store = Context.GetStoreData();
+    var excluded = store?.GetStoreBlob().GetExcludedPaymentMethods();
+    var methods = Plugin.PaymentMethods.Select(pair =>
+    {
+        var pmi = pair.Chain.PaymentMethodId(pair.Method);
+        var config = store?.GetPaymentMethodConfig<ChainPaymentMethodConfig>(pmi, Handlers);
+        var enabled = config is { Addresses.Length: > 0 } && excluded?.Match(pmi) is false;
+        return new { Chain = pair.Chain, Method = pair.Method, PaymentMethodId = pmi, Enabled = enabled, Available = RpcProvider.IsAvailable(pair.Chain.Id) };
+    }).ToArray();
+    var activeMethod = Context.Request.RouteValues["paymentMethodId"]?.ToString();
+    var onPluginPage = string.Equals(Context.Request.RouteValues["controller"]?.ToString(), "UINeoStore", StringComparison.OrdinalIgnoreCase);
+    var active = onPluginPage && methods.Any(m => m.PaymentMethodId.ToString() == activeMethod);
+    var parentStatus = !methods.Any(m => m.Enabled) ? "pending" : methods.Any(m => m.Enabled && !m.Available) ? "disabled" : "enabled";
+    var first = methods.FirstOrDefault(m => m.Enabled) ?? methods.FirstOrDefault();
+}
+@if (first is not null)
+{
+    <li class="nav-item">
+        <a id="Nav-Neo" class="nav-link @(active ? "active" : "")"
+           asp-controller="UINeoStore" asp-action="GetStorePaymentMethod"
+           asp-route-storeId="@ScopeProvider.GetCurrentStoreId()" asp-route-paymentMethodId="@first.PaymentMethodId">
+            <span class="me-2 btcpay-status btcpay-status--@parentStatus"></span>
+            <span>@Plugin.Definition.DisplayName</span>
+        </a>
+        @if (active)
+        {
+            <ul id="Nav-Neo-Methods" class="navbar-nav">
+                @foreach (var method in methods)
+                {
+                    var methodActive = method.PaymentMethodId.ToString() == activeMethod;
+                    var status = !method.Enabled ? "pending" : method.Available ? "enabled" : "disabled";
+                    <li class="nav-item nav-item-sub">
+                        <a class="nav-link @(methodActive ? "active" : "")" asp-controller="UINeoStore" asp-action="GetStorePaymentMethod"
+                           asp-route-storeId="@ScopeProvider.GetCurrentStoreId()" asp-route-paymentMethodId="@method.PaymentMethodId">
+                            <span class="me-2 btcpay-status btcpay-status--@status"></span>
+                            <span>@method.Method.DisplayName</span>
+                        </a>
+                    </li>
+                }
+            </ul>
+        }
+    </li>
+}

@@ -1,0 +1,78 @@
+name: Build and test
+
+# BTCPay Server starts inside the runner against a PostgreSQL service container; the chains are fake nodes.
+# The pack job then builds the .btcpay package of every plugin and keeps it as an artifact.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: neo_tests
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      NEO_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=neo_tests;Username=postgres
+      DOTNET_NOLOGO: 1
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        run: dotnet build tests/BTCPayServer.Plugins.Tests -m:1 -p:StaticWebAssetsEnabled=false
+      - name: Format check
+        run: |
+          dotnet format src/BTCPayServer.Plugins.Chains --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.Neo --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.BNBChain --verify-no-changes --no-restore
+          dotnet format tests/BTCPayServer.Plugins.Tests --verify-no-changes --no-restore
+      - name: Test (unit and host)
+        run: dotnet test tests/BTCPayServer.Plugins.Tests -m:1 -p:StaticWebAssetsEnabled=false --no-build --logger trx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: tests/BTCPayServer.Plugins.Tests/TestResults/*.trx
+
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: test
+    strategy:
+      matrix:
+        plugin: [BTCPayServer.Plugins.Neo, BTCPayServer.Plugins.BNBChain]
+    env:
+      DOTNET_NOLOGO: 1
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Pack
+        run: ./pack.sh ${{ matrix.plugin }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.plugin }}
+          path: artifacts/packed/${{ matrix.plugin }}/*
