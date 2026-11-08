@@ -2,6 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- No static web assets of our own, and none collected from BTCPay Server: with the switch set here instead of
+         as a global property on the reference, every BTCPay project builds once (the plugin-builder hit a file race). -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
     <LangVersion>14.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -18,7 +21,6 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!-- Referencing BTCPay Server must not copy any of its artifacts into a published plugin. -->
     <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
-      <Properties>StaticWebAssetsEnabled=false</Properties>
       <Private>false</Private>
       <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
     </ProjectReference>
