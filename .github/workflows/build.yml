@@ -7,12 +7,16 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Mondays 05:23 UTC: the latest-btcpay job below, against BTCPay Server's newest release.
+    - cron: "23 5 * * 1"
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     services:
@@ -87,6 +91,46 @@ jobs:
         with:
           name: ${{ matrix.plugin }}
           path: artifacts/packed/${{ matrix.plugin }}/*
+
+  # Every week (and on demand): the same build and tests against BTCPay Server's latest release instead of the pinned
+  # submodule, so an upstream change that breaks a plugin shows up here before a merchant notices.
+  latest-btcpay:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: neo_tests
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      NEO_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=neo_tests;Username=postgres
+      DOTNET_NOLOGO: 1
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Move BTCPay Server to its latest release
+        run: |
+          latest=$(git ls-remote --tags --refs https://github.com/btcpayserver/btcpayserver 'v*' | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          echo "Testing against BTCPay Server $latest"
+          echo "Tested against BTCPay Server $latest" >> "$GITHUB_STEP_SUMMARY"
+          git -C submodules/btcpayserver fetch --depth 1 origin "refs/tags/$latest:refs/tags/$latest"
+          git -C submodules/btcpayserver checkout --quiet "$latest"
+      - name: Build
+        run: dotnet build tests/BTCPayServer.Plugins.Tests -m:1 -p:StaticWebAssetsEnabled=false
+      - name: Test (unit and host)
+        run: dotnet test tests/BTCPayServer.Plugins.Tests -m:1 -p:StaticWebAssetsEnabled=false --no-build
 
   # The demo: BTCPay Server with the NEAR plugin on the NEAR testnet, an invoice paid from a throwaway testnet account,
   # recorded in a browser. On demand only; the accounts come from repository secrets (NEAR_DEMO_PAYER_ID,
