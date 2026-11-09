@@ -20,6 +20,9 @@ internal abstract class FakeJsonRpcNode : IAsyncDisposable
     /// <summary>When set, every request fails with HTTP 429, like a throttling public node.</summary>
     public bool Throttle { get; set; }
 
+    /// <summary>The HTTP status a JSON-RPC error travels on: 200 on most nodes, 422 behind some NEAR proxies.</summary>
+    public int ErrorStatusCode { get; set; } = 200;
+
     public int Requests => Volatile.Read(ref requests);
     int requests;
 
@@ -35,11 +38,14 @@ internal abstract class FakeJsonRpcNode : IAsyncDisposable
         worker = Run();
     }
 
-    protected abstract JToken? Reply(string method, JArray parameters);
+    protected abstract JToken? Reply(string method, JToken? parameters);
 
-    protected sealed class RpcError(int code, string message) : Exception(message)
+    /// <summary>A JSON-RPC error; NEAR nodes add a kind and a cause, which the client reads.</summary>
+    protected sealed class RpcError(int code, string message, string? name = null, string? cause = null) : Exception(message)
     {
         public int Code { get; } = code;
+        public string? Name { get; } = name;
+        public string? Cause { get; } = cause;
     }
 
     protected static string Hash(string seed) => "0x" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(seed)));
@@ -70,11 +76,17 @@ internal abstract class FakeJsonRpcNode : IAsyncDisposable
                 var reply = new JObject { ["jsonrpc"] = "2.0", ["id"] = request["id"] };
                 try
                 {
-                    reply["result"] = Reply(request["method"]!.Value<string>()!, request["params"] as JArray ?? []) ?? JValue.CreateNull();
+                    reply["result"] = Reply(request["method"]!.Value<string>()!, request["params"]) ?? JValue.CreateNull();
                 }
                 catch (RpcError e)
                 {
-                    reply["error"] = new JObject { ["code"] = e.Code, ["message"] = e.Message };
+                    var error = new JObject { ["code"] = e.Code, ["message"] = e.Message };
+                    if (e.Name is not null)
+                        error["name"] = e.Name;
+                    if (e.Cause is not null)
+                        error["cause"] = new JObject { ["name"] = e.Cause };
+                    reply["error"] = error;
+                    context.Response.StatusCode = ErrorStatusCode;
                 }
                 var bytes = Encoding.UTF8.GetBytes(reply.ToString());
                 context.Response.ContentType = "application/json";

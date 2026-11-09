@@ -20,6 +20,10 @@
     <Project Path="src/BTCPayServer.Plugins.Chains/BTCPayServer.Plugins.Chains.csproj" />
     <Project Path="src/BTCPayServer.Plugins.Neo/BTCPayServer.Plugins.Neo.csproj" />
     <Project Path="src/BTCPayServer.Plugins.BNBChain/BTCPayServer.Plugins.BNBChain.csproj" />
+    <Project Path="src/BTCPayServer.Plugins.NEAR/BTCPayServer.Plugins.NEAR.csproj" />
+  </Folder>
+  <Folder Name="/demo/">
+    <Project Path="demo/DemoHost/DemoHost.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BTCPayServer.Plugins.Tests/BTCPayServer.Plugins.Tests.csproj" />

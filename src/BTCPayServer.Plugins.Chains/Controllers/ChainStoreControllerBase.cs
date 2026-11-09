@@ -33,7 +33,19 @@ public abstract class ChainStoreControllerBase<TPlugin> : Controller where TPlug
         var saved = Store.GetPaymentMethodConfig<ChainPaymentMethodConfig>(paymentMethodId, handlers);
         var config = saved ?? new ChainPaymentMethodConfig();
         var reserved = await Get<AddressAllocator>().GetUsedAddresses(chain, paymentMethodId, config.Addresses);
-        Get<ChainRpcProvider<TPlugin>>().Summaries.TryGetValue(chain.Id, out var summary);
+        var rpc = Get<ChainRpcProvider<TPlugin>>();
+        rpc.Summaries.TryGetValue(chain.Id, out var summary);
+        var client = rpc.GetClient(chain.Id);
+        var addresses = new List<EditChainPaymentMethodViewModel.AddressViewModel>();
+        foreach (var address in config.Addresses)
+        {
+            addresses.Add(new EditChainPaymentMethodViewModel.AddressViewModel
+            {
+                Value = address,
+                Available = !reserved.Contains(address),
+                Note = await DestinationChecks.NoteAsync(client, address, method, HttpContext.RequestAborted),
+            });
+        }
         return View(new EditChainPaymentMethodViewModel
         {
             PluginNavKey = context.Definition.NavKey,
@@ -43,6 +55,7 @@ public abstract class ChainStoreControllerBase<TPlugin> : Controller where TPlug
             AddressPlaceholder = chain.AddressPlaceholder,
             Currency = method.Currency,
             IsEvm = chain.IsEvm,
+            IsNear = chain.IsNear,
             Address = "",
             Enabled = saved is not null && !excluded.Match(paymentMethodId),
             PaymentLinkFormat = config.PaymentLinkFormat,
@@ -50,11 +63,7 @@ public abstract class ChainStoreControllerBase<TPlugin> : Controller where TPlug
             NodeError = summary?.Error,
             LatestBlockOnNode = summary?.LatestBlockOnNode,
             LatestBlockScanned = summary?.LatestBlockScanned,
-            Addresses = config.Addresses.Select(address => new EditChainPaymentMethodViewModel.AddressViewModel
-            {
-                Value = address,
-                Available = !reserved.Contains(address),
-            }).ToArray(),
+            Addresses = addresses.ToArray(),
         });
     }
 
@@ -108,6 +117,12 @@ public abstract class ChainStoreControllerBase<TPlugin> : Controller where TPlug
                     Severity = StatusMessageModel.StatusSeverity.Error,
                 });
                 return RedirectToAction(nameof(GetStorePaymentMethod), new { storeId = store.Id, paymentMethodId });
+            }
+            var client = Get<ChainRpcProvider<TPlugin>>().GetClient(chain.Id);
+            if (await DestinationChecks.FirstProblemAsync(client, added, method, HttpContext.RequestAborted) is { } problem)
+            {
+                ModelState.AddModelError(nameof(input.Address), problem);
+                return await GetStorePaymentMethod(paymentMethodId);
             }
             config.Addresses = [.. config.Addresses, .. added];
             config.MarkActivated();

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Plugins.Chains.Near;
 using NeoPaymentWatcher.Chains;
 using NeoPaymentWatcher.Chains.Evm;
 using NeoPaymentWatcher.Neo;
@@ -66,9 +67,12 @@ public sealed class ChainRpcProvider<TPlugin> where TPlugin : class
         }
     }
 
-    IChainClient Create(ChainDefinition chain) => chain.IsEvm
-        ? new EvmChainClient(chain.ToChainProfile(), loggers.CreateLogger<EvmChainClient>())
-        : new NeoChainClient(chain.ToChainProfile(), loggers.CreateLogger<NeoChainClient>());
+    IChainClient Create(ChainDefinition chain) => chain.Kind switch
+    {
+        ChainProfile.Evm => new EvmChainClient(chain.ToChainProfile(), loggers.CreateLogger<EvmChainClient>()),
+        ChainProfile.Near => new NearChainClient(chain.ToChainProfile(), loggers.CreateLogger<NearChainClient>()),
+        _ => new NeoChainClient(chain.ToChainProfile(), loggers.CreateLogger<NeoChainClient>()),
+    };
 
     /// <summary>Node reachable, right network, and the listener within ten minutes of the tip.</summary>
     public async Task UpdateSummary(string chainId, CancellationToken cancellationToken)

@@ -1,0 +1,108 @@
+@using System.Globalization
+@model BTCPayServer.Plugins.NEAR.Controllers.NEARPayViewModel
+@{
+    Layout = "_LayoutSimple";
+    var amount = Model.Due.ToString("0.########", CultureInfo.InvariantCulture);
+    ViewData["Title"] = $"Pay {amount} {Model.Currency}";
+    ViewData["ShowFooter"] = false;
+}
+<div class="mx-auto my-5" style="max-width: 36rem" id="near-pay"
+     data-invoice="@Model.InvoiceId"
+     data-method="@Model.PaymentMethodId"
+     data-destination="@Model.Destination"
+     data-units="@Model.DueUnits"
+     data-amount="@amount"
+     data-currency="@Model.Currency"
+     data-token="@(Model.TokenContract ?? "")"
+     data-decimals="@Model.Decimals"
+     data-network="@Model.Network"
+     data-rpc="@Model.RpcUrl"
+     data-status-url="@Model.StatusUrl"
+     data-checkout-url="@Model.CheckoutUrl"
+     data-expires="@Model.ExpiresAt.ToUnixTimeSeconds()">
+    <h2 class="mb-1">Pay @amount @Model.Currency</h2>
+    <p class="text-muted">@Model.MethodDisplayName · invoice <code>@Model.InvoiceId</code></p>
+    <div id="near-pay-status" class="alert alert-secondary" role="status">Waiting for your payment.</div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">From a NEAR wallet in this browser</h5>
+            <p class="card-text">
+                Connect a wallet and approve one transaction: exactly @amount @Model.Currency goes to the store's account, with the invoice id as the memo@(Model.TokenContract is null ? "" : ", and the account is registered with the token contract first if it is not yet").
+            </p>
+            <div id="near-wallet-mount">
+                <button type="button" class="btn btn-primary" id="near-connect" disabled>Loading wallets…</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">From any other wallet or an exchange</h5>
+            <dl class="row mb-2">
+                <dt class="col-sm-3">Amount</dt>
+                <dd class="col-sm-9"><code>@amount</code> @Model.Currency, exactly</dd>
+                <dt class="col-sm-3">To account</dt>
+                <dd class="col-sm-9 text-break"><code id="near-destination">@Model.Destination</code> <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-copy="@Model.Destination">copy</button></dd>
+                @if (Model.TokenContract is not null)
+                {
+                    <dt class="col-sm-3">Token</dt>
+                    <dd class="col-sm-9 text-break"><code>@Model.TokenContract</code></dd>
+                }
+                <dt class="col-sm-3">Network</dt>
+                <dd class="col-sm-9">NEAR @Model.Network</dd>
+                <dt class="col-sm-3">Memo</dt>
+                <dd class="col-sm-9">optional: <code>@Model.InvoiceId</code></dd>
+            </dl>
+            <p class="form-text mb-0">The account is reserved for this invoice until it is paid or expires, so a transfer from anywhere is matched by the account alone. This page updates by itself when the payment is seen on chain.</p>
+        </div>
+    </div>
+    <p class="mt-3"><a href="@Model.CheckoutUrl">Back to the checkout</a></p>
+</div>
+
+@section PageFootContent {
+    <script>
+        (function () {
+            var root = document.getElementById('near-pay');
+            var status = document.getElementById('near-pay-status');
+            document.querySelectorAll('[data-copy]').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    if (navigator.clipboard) {
+                        navigator.clipboard.writeText(button.getAttribute('data-copy'));
+                    }
+                    button.textContent = 'copied';
+                });
+            });
+            function show(kind, text) {
+                status.className = 'alert alert-' + kind;
+                status.textContent = text;
+            }
+            function poll() {
+                fetch(root.dataset.statusUrl, { credentials: 'same-origin' })
+                    .then(function (response) { return response.json(); })
+                    .then(function (model) {
+                        var state = String(model.status || '').toLowerCase();
+                        if (state === 'settled' || state === 'processing' || state === 'paid') {
+                            show('success', 'Payment received. Thank you.');
+                            return;
+                        }
+                        if (state === 'expired' || state === 'invalid') {
+                            show('danger', 'This invoice has ' + state + '. Go back to the checkout for a new one.');
+                            return;
+                        }
+                        setTimeout(poll, 3000);
+                    })
+                    .catch(function () { setTimeout(poll, 5000); });
+            }
+            poll();
+            window.nearPayShow = show;
+            setTimeout(function () {
+                if (!window.nearPayWalletsReady) {
+                    var mount = document.getElementById('near-wallet-mount');
+                    mount.innerHTML = '<p class="text-muted mb-0">The wallet connection did not load in this browser. Pay with the details below instead.</p>';
+                }
+            }, 10000);
+        })();
+    </script>
+    <script src="~/Resources/nearpay/app.js" defer></script>
+}

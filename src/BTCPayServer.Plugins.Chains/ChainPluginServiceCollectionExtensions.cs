@@ -43,11 +43,13 @@ public static class ChainPluginServiceCollectionExtensions
                 var pmi = chain.PaymentMethodId(method);
                 if (currencies.TryAdd(method.Currency, method))
                     rules.AddRange(method.RateRules);
-                services.AddTransactionLinkProvider(pmi, new ChainTransactionLinkProvider(chain.BlockExplorerLink));
+                services.AddTransactionLinkProvider(pmi, chain.IsNear
+                    ? new NearTransactionLinkProvider(chain.BlockExplorerLink, pmi)
+                    : new ChainTransactionLinkProvider(chain.BlockExplorerLink));
                 services.AddDefaultPrettyName(pmi, method.DisplayName);
                 services.AddSingleton<IPaymentMethodHandler>(provider =>
                     ActivatorUtilities.CreateInstance<ChainPaymentMethodHandler<TPlugin>>(provider, chain, method));
-                services.AddSingleton<IPaymentLinkExtension>(new ChainPaymentLinkExtension(pmi, chain, method));
+                services.AddSingleton<IPaymentLinkExtension>(new ChainPaymentLinkExtension(pmi, chain, method, definition.PayPage));
                 services.AddSingleton<ICheckoutModelExtension>(provider =>
                     ActivatorUtilities.CreateInstance<ChainCheckoutModelExtension>(provider, pmi, chain.CryptoImagePath, method.Currency));
             }

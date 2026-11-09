@@ -1,0 +1,16 @@
+{
+  "name": "btcpay-near-demo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Scripts behind the NEAR plugin's demo: pay a BTCPay invoice on the NEAR testnet from a throwaway account, and record the whole flow in a browser.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "pay": "node pay.mjs",
+    "record": "node record.mjs"
+  },
+  "dependencies": {
+    "near-api-js": "7.4.0",
+    "playwright": "1.65.0"
+  }
+}

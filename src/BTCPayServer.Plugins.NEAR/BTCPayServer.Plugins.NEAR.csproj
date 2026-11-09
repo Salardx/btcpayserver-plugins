@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- No static web assets of our own, and none collected from BTCPay Server: with the switch set here instead of
+         as a global property on the reference, every BTCPay project builds once (the plugin-builder hit a file race). -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>BTCPayServer.Plugins.NEAR</RootNamespace>
+    <Product>NEAR Payment Watcher</Product>
+    <Description>Accept NEAR, USDC and USDT on NEAR straight to your own account. Watch-only: no node, no keys, no custody. Customers pay from any NEAR wallet on the plugin's pay page.</Description>
+    <Version>0.1.0</Version>
+    <Authors>Salardx</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- The pay page's npm project (sources, node_modules) is not part of the .NET build; only its built bundle is. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);paypage/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="paypage/**" />
+    <Content Remove="paypage/**" />
+    <None Remove="paypage/**" />
+    <EmbeddedResource Remove="paypage/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\near.svg" LogicalName="BTCPayServer.Plugins.NEAR.near.svg" />
+    <!-- The pay page script, built by paypage/build.mjs; served by BTCPay at /Resources/nearpay/app.js through the
+         EmbeddedFileProvider over this assembly, so the default manifest name (RootNamespace + path) must stay. -->
+    <EmbeddedResource Include="Resources\nearpay\app.js" />
+    <ProjectReference Include="..\BTCPayServer.Plugins.Chains\BTCPayServer.Plugins.Chains.csproj" />
+    <!-- Referencing BTCPay Server must not copy any of its artifacts into the published plugin. -->
+    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BTCPayServer.Plugins.Tests" />
+  </ItemGroup>
+
+  <!-- BTCPay Server's own assemblies arrive transitively through the shared core; the host provides them, so they stay out of the package. -->
+  <Target Name="StripBTCPayServerAssemblies" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="$([System.String]::Copy('%(Filename)').StartsWith('BTCPayServer.')) And !$([System.String]::Copy('%(Filename)').StartsWith('BTCPayServer.Plugins.'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

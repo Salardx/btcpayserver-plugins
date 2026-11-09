@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- No static web assets of our own, and none collected from BTCPay Server: with the switch set here instead of
+         as a global property on the reference, every BTCPay project builds once. -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DemoHost</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Runs BTCPay Server in-process with the Payment Watcher plugins against a PostgreSQL database, for the demo recording and for trying the plugins by hand.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BTCPayServer.Plugins.Neo\BTCPayServer.Plugins.Neo.csproj" />
+    <ProjectReference Include="..\..\src\BTCPayServer.Plugins.BNBChain\BTCPayServer.Plugins.BNBChain.csproj" />
+    <ProjectReference Include="..\..\src\BTCPayServer.Plugins.NEAR\BTCPayServer.Plugins.NEAR.csproj" />
+    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
+  </ItemGroup>
+
+</Project>

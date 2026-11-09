@@ -112,8 +112,9 @@ internal sealed class FakeEvmNode : FakeJsonRpcNode
         ["transactions"] = transactions,
     };
 
-    protected override JToken? Reply(string method, JArray parameters)
+    protected override JToken? Reply(string method, JToken? parameters)
     {
+        var args = parameters as JArray ?? [];
         lock (Gate)
         {
             switch (method)
@@ -124,15 +125,15 @@ internal sealed class FakeEvmNode : FakeJsonRpcNode
                     return EvmHex.Quantity((ulong)(blocks.Count - 1));
                 case "eth_getBlockByNumber":
                     {
-                        var tag = parameters[0]!.Value<string>()!;
+                        var tag = args[0]!.Value<string>()!;
                         var index = tag is "latest" or "finalized" or "safe" ? blocks.Count - 1 : (int)EvmHex.ToInt64(tag);
                         return index >= 0 && index < blocks.Count ? blocks[index] : null;
                     }
                 case "eth_getTransactionReceipt":
-                    return receipts.TryGetValue(parameters[0]!.Value<string>()!, out var receipt) ? receipt : null;
+                    return receipts.TryGetValue(args[0]!.Value<string>()!, out var receipt) ? receipt : null;
                 case "eth_getLogs":
                     {
-                        var filter = (JObject)parameters[0]!;
+                        var filter = (JObject)args[0]!;
                         var blockHash = filter["blockHash"]?.Value<string>();
                         if (blockHash is null)
                             throw new RpcError(-32602, "this node only answers eth_getLogs by block hash");

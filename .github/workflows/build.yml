@@ -44,7 +44,18 @@ jobs:
           dotnet format src/BTCPayServer.Plugins.Chains --verify-no-changes --no-restore
           dotnet format src/BTCPayServer.Plugins.Neo --verify-no-changes --no-restore
           dotnet format src/BTCPayServer.Plugins.BNBChain --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.NEAR --verify-no-changes --no-restore
           dotnet format tests/BTCPayServer.Plugins.Tests --verify-no-changes --no-restore
+          dotnet format demo/DemoHost --verify-no-changes --no-restore
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Pay page bundle matches its source
+        working-directory: src/BTCPayServer.Plugins.NEAR/paypage
+        run: |
+          npm ci
+          npm run build
+          git diff --exit-code -- ../Resources/nearpay/app.js
       - name: Test (unit and host)
         run: dotnet test tests/BTCPayServer.Plugins.Tests -m:1 -p:StaticWebAssetsEnabled=false --no-build --logger trx
       - uses: actions/upload-artifact@v4
@@ -59,7 +70,7 @@ jobs:
     needs: test
     strategy:
       matrix:
-        plugin: [BTCPayServer.Plugins.Neo, BTCPayServer.Plugins.BNBChain]
+        plugin: [BTCPayServer.Plugins.Neo, BTCPayServer.Plugins.BNBChain, BTCPayServer.Plugins.NEAR]
     env:
       DOTNET_NOLOGO: 1
       DOTNET_CLI_TELEMETRY_OPTOUT: 1
@@ -76,3 +87,75 @@ jobs:
         with:
           name: ${{ matrix.plugin }}
           path: artifacts/packed/${{ matrix.plugin }}/*
+
+  # The demo: BTCPay Server with the NEAR plugin on the NEAR testnet, an invoice paid from a throwaway testnet account,
+  # recorded in a browser. On demand only; the accounts come from repository secrets (NEAR_DEMO_PAYER_ID,
+  # NEAR_DEMO_PAYER_KEY, NEAR_DEMO_SHOP, optionally NEAR_DEMO_USDC with the testnet USDC contract when the payer holds test USDC).
+  demo:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: demo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DOTNET_NOLOGO: 1
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DEMO_POSTGRES: Host=127.0.0.1;Port=5432;Username=postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the host
+        run: dotnet build demo/DemoHost -m:1 -p:StaticWebAssetsEnabled=false
+      - name: Install the recorder
+        working-directory: demo
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start BTCPay Server with the plugins
+        run: |
+          nohup dotnet run --project demo/DemoHost --no-build > demo-host.log 2>&1 &
+          for i in $(seq 1 60); do
+            if [ -f demo-host.json ]; then echo "up after $i tries"; break; fi
+            sleep 5
+          done
+          if [ ! -f demo-host.json ]; then echo "BTCPay Server did not start"; tail -50 demo-host.log; exit 1; fi
+      - name: Pay an invoice on testnet and record it
+        working-directory: demo
+        env:
+          DEMO_HOST_FILE: ../demo-host.json
+          NEAR_SHOP: ${{ secrets.NEAR_DEMO_SHOP }}
+          NEAR_PAYER_ID: ${{ secrets.NEAR_DEMO_PAYER_ID }}
+          NEAR_PAYER_KEY: ${{ secrets.NEAR_DEMO_PAYER_KEY }}
+          NEAR_USDC: ${{ secrets.NEAR_DEMO_USDC }}
+        run: node record.mjs
+      - name: Convert the video
+        if: always()
+        working-directory: demo
+        run: |
+          for f in out/*/demo.webm; do
+            if [ -f "$f" ]; then ffmpeg -loglevel error -y -i "$f" -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${f%.webm}.mp4" || true; fi
+          done
+          ls -la out/* || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: near-demo
+          path: |
+            demo/out/
+            demo-host.log

@@ -1,1 +1,1 @@
-PROJECTS="BTCPayServer.Plugins.Neo BTCPayServer.Plugins.BNBChain"
+PROJECTS="BTCPayServer.Plugins.Neo BTCPayServer.Plugins.BNBChain BTCPayServer.Plugins.NEAR"

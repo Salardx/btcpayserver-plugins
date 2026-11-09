@@ -1,6 +1,7 @@
 using System.Reflection;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Configuration;
+using BTCPayServer.Plugins.Chains.Near;
 using Microsoft.Extensions.Configuration;
 using NeoPaymentWatcher.Chains.Evm;
 using NeoPaymentWatcher.Neo;
@@ -42,7 +43,9 @@ public static class ChainDefaults
         string hash;
         var ok = chain.IsEvm
             ? EvmHex.TryNormalizeAddress(contract, out hash)
-            : NeoAddress.TryNormalizeContractHash(contract, out hash);
+            : chain.IsNear
+                ? NearAccountId.TryNormalize(contract, out hash)
+                : NeoAddress.TryNormalizeContractHash(contract, out hash);
         if (!ok)
             throw new InvalidOperationException($"{chain.Id}_{currency}_CONTRACT is not a valid {chain.DisplayName} contract address: {contract}");
         return hash;

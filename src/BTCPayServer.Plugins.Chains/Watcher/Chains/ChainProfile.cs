@@ -21,13 +21,18 @@ public sealed record ChainProfile(
 {
     public const string NeoN3 = "neo-n3";
     public const string Evm = "evm";
+    public const string Near = "near";
 
     public bool IsEvm => Kind == Evm;
+
+    public bool IsNear => Kind == Near;
 
     /// <summary>Pins a database to one network. Neo N3 keeps its magic number, so databases from before multi-chain support still open.</summary>
     public string NetworkKey => IsEvm
         ? $"evm:{ChainId!.Value.ToString(CultureInfo.InvariantCulture)}"
-        : NetworkMagic!.Value.ToString(CultureInfo.InvariantCulture);
+        : IsNear
+            ? $"near:{Network}"
+            : NetworkMagic!.Value.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>"Neo X · testnet", as the checkout page shows it.</summary>
     public string Label => $"{DisplayName} · {NetworkLabel}";

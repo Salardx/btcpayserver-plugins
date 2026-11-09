@@ -88,8 +88,9 @@ internal sealed class FakeNeoNode : FakeJsonRpcNode
         return new JObject { ["type"] = "ByteString", ["value"] = Convert.ToBase64String(hash) };
     }
 
-    protected override JToken? Reply(string method, JArray parameters)
+    protected override JToken? Reply(string method, JToken? parameters)
     {
+        var args = parameters as JArray ?? [];
         lock (Gate)
         {
             switch (method)
@@ -100,14 +101,14 @@ internal sealed class FakeNeoNode : FakeJsonRpcNode
                     return blocks.Count;
                 case "getblock":
                     {
-                        var index = parameters[0]!.Value<int>();
+                        var index = args[0]!.Value<int>();
                         if (index < 0 || index >= blocks.Count)
                             throw new RpcError(-100, "Unknown block");
                         return blocks[index];
                     }
                 case "getapplicationlog":
                     {
-                        var id = parameters[0]!.Value<string>()!;
+                        var id = args[0]!.Value<string>()!;
                         return logs.TryGetValue(id, out var log) ? log : throw new RpcError(-100, "Unknown transaction");
                     }
                 default:

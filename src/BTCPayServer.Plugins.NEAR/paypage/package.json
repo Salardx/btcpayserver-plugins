@@ -1,0 +1,23 @@
+{
+  "name": "nearpay-paypage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser script of the NEAR plugin's pay page: connects a NEAR wallet through the Wallet Selector and sends the invoice's transfer.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check src/app.js",
+    "test": "node smoke.mjs"
+  },
+  "dependencies": {
+    "@near-wallet-selector/core": "10.1.4",
+    "@near-wallet-selector/hot-wallet": "10.1.4",
+    "@near-wallet-selector/meteor-wallet": "10.1.4",
+    "@near-wallet-selector/my-near-wallet": "10.1.4",
+    "@near-wallet-selector/nightly": "10.1.4",
+    "buffer": "6.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

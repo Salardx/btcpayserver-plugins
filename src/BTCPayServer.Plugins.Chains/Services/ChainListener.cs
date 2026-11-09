@@ -5,11 +5,12 @@ using Microsoft.Extensions.Hosting;
 namespace BTCPayServer.Plugins.Chains.Services;
 
 /// <summary>
-/// Follows each chain block by block from where it left off, looking only at the addresses that are reserved by an
-/// invoice. With nothing reserved it just moves the cursor: a payment can only land in a block made after its
-/// invoice existed. On chains with probabilistic finality it stays <see cref="ChainDefinition.FinalityBlocks"/>
-/// behind the tip, so what it records is final. One advisory lock per chain keeps two hosts from scanning the same
-/// chain at once.
+/// Follows each chain from where it left off, looking only at the addresses that are reserved by an invoice. With
+/// nothing reserved it just moves the cursor: a payment can only land in a block made after its invoice existed.
+/// Most chains are read block by block; a chain whose client is an <see cref="IRangeScanner"/> is read a span at
+/// a time and polled at the pace the client asks for. On chains with probabilistic finality the listener stays
+/// <see cref="ChainDefinition.FinalityBlocks"/> behind the tip, so what it records is final. One advisory lock
+/// per chain keeps two hosts from scanning the same chain at once.
 /// </summary>
 public sealed class ChainListener<TPlugin>(
     ChainPluginContext<TPlugin> context,
@@ -24,6 +25,8 @@ public sealed class ChainListener<TPlugin>(
     internal const int BlocksPerTurn = 50;
     const int InitialBackoffMs = 5_000;
     const int MaximumBackoffMs = 60_000;
+
+    readonly record struct Turn(bool Advanced, bool AtTip);
 
     CancellationTokenSource? cts;
     Task workers = Task.CompletedTask;
@@ -65,10 +68,10 @@ public sealed class ChainListener<TPlugin>(
                 }
                 else
                 {
-                    var advanced = false;
-                    await WithChainLock(chainId, async () => advanced = await Scan(chain, key, token), token);
-                    if (advanced)
-                        delay = 0;
+                    var turn = new Turn(false, false);
+                    await WithChainLock(chainId, async () => turn = await Scan(chain, key, token), token);
+                    var poll = rpc.GetClient(chainId) is IRangeScanner ranged ? (int)ranged.PollInterval.TotalMilliseconds : 0;
+                    delay = turn.Advanced && !turn.AtTip ? 0 : Math.Max(turn.Advanced ? 0 : delay, poll);
                 }
                 backoff = InitialBackoffMs;
             }
@@ -99,8 +102,8 @@ public sealed class ChainListener<TPlugin>(
         }
     }
 
-    /// <summary>Scans up to <see cref="BlocksPerTurn"/> new blocks. Returns true when the cursor moved.</summary>
-    async Task<bool> Scan(ChainDefinition chain, string key, CancellationToken token)
+    /// <summary>Scans up to <see cref="BlocksPerTurn"/> new blocks, or one span of a range scanner. Says whether the cursor moved and whether it reached the tip.</summary>
+    async Task<Turn> Scan(ChainDefinition chain, string key, CancellationToken token)
     {
         var client = rpc.GetClient(chain.Id);
         var ceiling = (long)await client.GetTipAsync(token) - chain.FinalityBlocks;
@@ -113,7 +116,7 @@ public sealed class ChainListener<TPlugin>(
             logger.LogInformation("{Chain}: starting at block {Block}", chain.Id, ceiling);
         }
         if (state.LastBlockIndex >= ceiling)
-            return false;
+            return new Turn(false, true);
 
         var watched = new HashSet<string>(StringComparer.Ordinal);
         foreach (var method in chain.PaymentMethods)
@@ -124,10 +127,23 @@ public sealed class ChainListener<TPlugin>(
             state.LastBlockIndex = ceiling;
             state.UpdatedAt = DateTimeOffset.UtcNow;
             await states.Save(key, state);
-            return true;
+            return new Turn(true, true);
         }
 
         var tokens = chain.TokenHashes();
+        if (client is IRangeScanner ranged)
+        {
+            var span = Math.Min(ceiling, state.LastBlockIndex + ranged.MaxBlocksPerRange);
+            var range = await ranged.ScanRangeAsync((uint)(state.LastBlockIndex + 1), (uint)span, watched, tokens, token);
+            foreach (var transfer in range.Transfers)
+                await recorder.RecordAsync(chain, transfer, token);
+            state.LastBlockIndex = span;
+            state.LastBlockTime = range.ToTime;
+            state.UpdatedAt = DateTimeOffset.UtcNow;
+            await states.Save(key, state);
+            return new Turn(true, span >= ceiling);
+        }
+
         var end = Math.Min(ceiling, state.LastBlockIndex + BlocksPerTurn);
         for (var index = state.LastBlockIndex + 1; index <= end; index++)
         {
@@ -140,7 +156,7 @@ public sealed class ChainListener<TPlugin>(
             state.UpdatedAt = DateTimeOffset.UtcNow;
             await states.Save(key, state);
         }
-        return true;
+        return new Turn(true, end >= ceiling);
     }
 
     async Task WithChainLock(string chainId, Func<Task> action, CancellationToken cancellationToken)

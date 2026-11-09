@@ -5,6 +5,7 @@ using BTCPayServer.Data;
 using BTCPayServer.Hosting;
 using BTCPayServer.Payments;
 using BTCPayServer.Plugins.BNBChain;
+using BTCPayServer.Plugins.NEAR;
 using BTCPayServer.Plugins.Chains.Services;
 using BTCPayServer.Plugins.Neo;
 using BTCPayServer.Services.Invoices;
@@ -23,7 +24,7 @@ namespace BTCPayServer.Plugins.Tests.Host;
 
 /// <summary>
 /// Runs BTCPay Server in-process with both plugins loaded, a fresh PostgreSQL database and fake nodes, and takes
-/// invoices from creation to settlement on Neo N3, Neo X and BNB Smart Chain (native BNB and a BEP-20 token).
+/// invoices from creation to settlement on Neo N3, Neo X, BNB Smart Chain (native BNB and a BEP-20 token) and NEAR (NEAR and USDC).
 /// Needs <c>NEO_TEST_POSTGRES</c> (a connection string whose user may create databases); without it the test is skipped.
 /// </summary>
 public class HostTests
@@ -34,6 +35,9 @@ public class HostTests
     static readonly string[] BscPool = ["0x2222222222222222222222222222222222222222", "0x3333333333333333333333333333333333333333"];
     const string EvmPayer = "0x62b6e27213824c6a2b983c018377d9bd0fdc5e17";
     const string Usdt = "0x55d398326f99059ff775485246999027b3197955";
+    static readonly string[] NearPool = ["shop.testnet", "pay2.shop.testnet"];
+    const string NearPayer = "alice.testnet";
+    static readonly BigInteger OneNear = BigInteger.Pow(10, 24);
 
     [Fact]
     public async Task Invoices_settle_from_a_transfer_on_each_chain_and_survive_a_restart()
@@ -45,6 +49,11 @@ public class HostTests
         await using var neo = new FakeNeoNode();
         await using var neox = new FakeEvmNode(chainId: 12227332);
         await using var bsc = new FakeEvmNode(chainId: 97);
+        await using var near = new FakeNearNode();
+        foreach (var account in NearPool)
+            near.Fund(account, OneNear);
+        near.Fund(NearPayer, 100 * OneNear);
+        near.SetTokenBalance(FakeNearNode.Usdc, NearPayer, 1_000_000_000);
         var database = "neo_host_" + Guid.NewGuid().ToString("N");
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
         await using (var admin = new NpgsqlConnection(builder.ConnectionString))
@@ -69,11 +78,12 @@ public class HostTests
             ["postgres"] = builder.ConnectionString,
             ["TEST_RUNNER_ENABLED"] = "true",
             ["disable-registration"] = "false",
-            ["DEBUG_PLUGINS"] = typeof(NeoPlugin).Assembly.Location + ";" + typeof(BNBChainPlugin).Assembly.Location,
+            ["DEBUG_PLUGINS"] = typeof(NeoPlugin).Assembly.Location + ";" + typeof(BNBChainPlugin).Assembly.Location + ";" + typeof(NEARPlugin).Assembly.Location,
             ["NEO_JSONRPC_URI"] = neo.Url,
             ["NEOX_JSONRPC_URI"] = neox.Url,
             ["BSC_JSONRPC_URI"] = bsc.Url,
             ["BSC_USDT_CONTRACT"] = Usdt,
+            ["NEAR_JSONRPC_URI"] = near.Url,
         };
         IHost BuildHost() => Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
             .UseEnvironment("Development")
@@ -88,12 +98,14 @@ public class HostTests
         string invoiceId;
         string neoxInvoiceId;
         string usdtInvoiceId;
+        string nearInvoiceId;
         try
         {
             var handlers = host.Services.GetRequiredService<PaymentMethodHandlerDictionary>();
-            foreach (var pmi in new[] { "GAS-NEO", "GAS-NEOX", "BNB-BSC", "USDT-BSC" })
+            foreach (var pmi in new[] { "GAS-NEO", "GAS-NEOX", "BNB-BSC", "USDT-BSC", "NEAR-NEAR", "USDC-NEAR" })
                 Assert.True(handlers.TryGetValue(new PaymentMethodId(pmi), out _), $"{pmi} handler not registered");
             Assert.False(handlers.TryGetValue(new PaymentMethodId("USDC-BSC"), out _), "USDC-BSC has no testnet contract and must not be offered");
+            Assert.False(handlers.TryGetValue(new PaymentMethodId("USDT-NEAR"), out _), "USDT-NEAR has no testnet contract and must not be offered");
 
             var address = host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
             using var http = new HttpClient { BaseAddress = new Uri(address) };
@@ -112,11 +124,21 @@ public class HostTests
                 new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(BscPool) } });
             await api.UpdateStorePaymentMethod(store.Id, "USDT-BSC",
                 new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(BscPool) } });
+            // NEAR: an account must be well formed and, if named, exist on the chain.
+            foreach (var invalid in new[] { "not an account!", "ghost.testnet" })
+                await Assert.ThrowsAsync<GreenfieldValidationException>(() => api.UpdateStorePaymentMethod(store.Id, "NEAR-NEAR",
+                    new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(invalid) } }));
+            await api.UpdateStorePaymentMethod(store.Id, "NEAR-NEAR",
+                new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(NearPool) } });
+            await api.UpdateStorePaymentMethod(store.Id, "USDC-NEAR",
+                new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(NearPool) } });
 
             host.Services.GetRequiredService<ChainActivationService<NeoPlugin>>().Invalidate();
             host.Services.GetRequiredService<ChainActivationService<BNBChainPlugin>>().Invalidate();
+            host.Services.GetRequiredService<ChainActivationService<NEARPlugin>>().Invalidate();
             var neoRpc = host.Services.GetRequiredService<ChainRpcProvider<NeoPlugin>>();
             var bnbRpc = host.Services.GetRequiredService<ChainRpcProvider<BNBChainPlugin>>();
+            var nearRpc = host.Services.GetRequiredService<ChainRpcProvider<NEARPlugin>>();
             foreach (var chainId in new[] { "NEO", "NEOX" })
                 await Eventually(async () =>
                 {
@@ -128,6 +150,11 @@ public class HostTests
                 await bnbRpc.UpdateSummary("BSC", CancellationToken.None);
                 return bnbRpc.IsAvailable("BSC");
             }, "BSC never became available");
+            await Eventually(async () =>
+            {
+                await nearRpc.UpdateSummary("NEAR", CancellationToken.None);
+                return nearRpc.IsAvailable("NEAR");
+            }, "NEAR never became available");
 
             // Neo N3: two invoices take two different addresses, a transfer settles the first.
             var invoice = await CreateInvoice(api, store.Id, "GAS-NEO", "GAS", 1.5m);
@@ -192,6 +219,38 @@ public class HostTests
             Assert.Equal(0.5m, bnbPayment.Value);
             Assert.StartsWith(bnbTx!, bnbPayment.Id);
 
+            // NEAR: the checkout links to the pay page; the payment is found from the account's balance and named by its transaction.
+            var nearInvoice = await CreateInvoice(api, store.Id, "NEAR-NEAR", "NEAR", 1.5m);
+            var nearPrompt = Assert.Single(await api.GetInvoicePaymentMethods(nearInvoice.Id));
+            Assert.Contains(nearPrompt.Destination, NearPool);
+            Assert.Contains($"/plugins/near/pay/{nearInvoice.Id}/NEAR-NEAR", nearPrompt.PaymentLink);
+            var payPage = await http.GetAsync(nearPrompt.PaymentLink);
+            payPage.EnsureSuccessStatusCode();
+            var payHtml = await payPage.Content.ReadAsStringAsync();
+            Assert.Contains(nearPrompt.Destination, payHtml);
+            Assert.Contains("1.5", payHtml);
+            var nearCheckout = await http.GetAsync(nearInvoice.CheckoutLink);
+            nearCheckout.EnsureSuccessStatusCode();
+            Assert.Contains("/plugins/near/pay/", await nearCheckout.Content.ReadAsStringAsync());
+            near.AddNativeTransfer(out var nearTx, NearPayer, nearPrompt.Destination, 3 * OneNear / 2, crossShard: true);
+            near.AddBlocks(2);
+            await Eventually(async () => (await api.GetInvoice(nearInvoice.Id)).Status == InvoiceStatus.Settled, "the NEAR invoice did not settle");
+            var nearPayment = Assert.Single((await api.GetInvoicePaymentMethods(nearInvoice.Id)).Single().Payments);
+            Assert.Equal(1.5m, nearPayment.Value);
+            Assert.StartsWith(nearTx, nearPayment.Id);
+            nearInvoiceId = nearInvoice.Id;
+
+            // ... and USDC on NEAR, a NEP-141 transfer call naming the account, with the invoice id as memo.
+            var usdcInvoice = await CreateInvoice(api, store.Id, "USDC-NEAR", "USDC", 10m);
+            var usdcPrompt = Assert.Single(await api.GetInvoicePaymentMethods(usdcInvoice.Id));
+            Assert.Contains(usdcPrompt.Destination, NearPool);
+            near.AddTokenTransfer(out var usdcTx, FakeNearNode.Usdc, NearPayer, usdcPrompt.Destination, 10_000_000, memo: usdcInvoice.Id);
+            near.AddBlocks(2);
+            await Eventually(async () => (await api.GetInvoice(usdcInvoice.Id)).Status == InvoiceStatus.Settled, "the USDC on NEAR invoice did not settle");
+            var usdcPayment = Assert.Single((await api.GetInvoicePaymentMethods(usdcInvoice.Id)).Single().Payments);
+            Assert.Equal(10m, usdcPayment.Value);
+            Assert.StartsWith(usdcTx, usdcPayment.Id);
+
             // A failed transaction and a transfer to an address nobody reserved change nothing.
             neo.AddBlock(out _, Payer, secondPrompt.Destination, 150_000_000, halt: false);
             neox.AddBlock(out _, EvmPayer, "0x1111111111111111111111111111111111111111", BigInteger.Parse("1500000000000000000"));
@@ -218,6 +277,7 @@ public class HostTests
             Assert.Equal(InvoiceStatus.Settled, (await api.GetInvoice(invoiceId)).Status);
             Assert.Equal(InvoiceStatus.Settled, (await api.GetInvoice(neoxInvoiceId)).Status);
             Assert.Equal(InvoiceStatus.Settled, (await api.GetInvoice(usdtInvoiceId)).Status);
+            Assert.Equal(InvoiceStatus.Settled, (await api.GetInvoice(nearInvoiceId)).Status);
             var states = host.Services.GetRequiredService<ChainStateStore>();
             var neoxState = await states.Get("Chains.NEOX.Listener");
             Assert.NotNull(neoxState);
@@ -225,6 +285,9 @@ public class HostTests
             var bscState = await states.Get("Chains.BSC.Listener");
             Assert.NotNull(bscState);
             Assert.True(bscState.LastBlockIndex >= bsc.Tip - 7, $"BSC cursor {bscState.LastBlockIndex} is too far behind tip {bsc.Tip}");
+            var nearState = await states.Get("Chains.NEAR.Listener");
+            Assert.NotNull(nearState);
+            Assert.True(nearState.LastBlockIndex >= near.Tip - 1, $"NEAR cursor {nearState.LastBlockIndex} is behind tip {near.Tip}");
             await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(60));
         }
         finally

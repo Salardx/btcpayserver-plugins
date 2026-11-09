@@ -1,0 +1,29 @@
+@using BTCPayServer
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.Chains.Services
+@using BTCPayServer.Plugins.NEAR
+@using Microsoft.AspNetCore.Identity
+@inject ChainRpcProvider<NEARPlugin> RpcProvider
+@inject SignInManager<ApplicationUser> SignInManager
+
+@if (SignInManager.IsSignedIn(User) && User.IsInRole(Roles.ServerAdmin) && RpcProvider.Summaries.Any())
+{
+    foreach (var pair in RpcProvider.Summaries)
+    {
+        var summary = pair.Value;
+        var status = summary.RpcAvailable ? summary.Synced ? "enabled" : "pending" : "disabled";
+        <h5 class="d-flex align-items-center fw-semibold">
+            <span class="me-2 btcpay-status btcpay-status--@status"></span>
+            @summary.DisplayName
+        </h5>
+        <ul>
+            @if (!summary.RpcAvailable)
+            {
+                <li class="text-danger">Node not reachable: @summary.Error</li>
+            }
+            <li>Chain tip: @(summary.LatestBlockOnNode?.ToString() ?? "unknown")</li>
+            <li>Last block scanned: @(summary.LatestBlockScanned?.ToString() ?? "not started")</li>
+            <li>@(summary.Synced ? "In sync" : "Catching up"), checked @summary.UpdatedAt.ToString("u")</li>
+        </ul>
+    }
+}

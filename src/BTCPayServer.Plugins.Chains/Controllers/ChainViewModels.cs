@@ -11,6 +11,7 @@ public class EditChainPaymentMethodViewModel
     public required string AddressPlaceholder { get; init; }
     public required string Currency { get; init; }
     public required bool IsEvm { get; init; }
+    public bool IsNear { get; init; }
     public string? Address { get; init; }
     public bool Enabled { get; init; }
     public PaymentLinkFormat PaymentLinkFormat { get; init; } = PaymentLinkFormat.Standard;
@@ -24,6 +25,8 @@ public class EditChainPaymentMethodViewModel
     {
         public required string Value { get; init; }
         public bool Available { get; init; }
+        /// <summary>What the chain says about the address, when there is something to say (an unregistered token receiver, for instance).</summary>
+        public string? Note { get; init; }
     }
 }
 

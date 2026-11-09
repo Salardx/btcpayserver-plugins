@@ -1,3 +1,4 @@
+using BTCPayServer.Plugins.Chains.Near;
 using NeoPaymentWatcher.Chains.Evm;
 using NeoPaymentWatcher.Neo;
 
@@ -5,8 +6,8 @@ namespace BTCPayServer.Plugins.Chains.Services;
 
 /// <summary>
 /// Address checks per chain, without a node. Neo N3 addresses are Base58Check with the N3 version byte; EVM
-/// addresses are 20-byte hex, and a mixed-case one must carry a correct EIP-55 checksum. The canonical form is
-/// what is stored and shown; the key is what notifications and logs are matched on.
+/// addresses are 20-byte hex, and a mixed-case one must carry a correct EIP-55 checksum; NEAR addresses are
+/// account ids. The canonical form is what is stored and shown; the key is what notifications and logs are matched on.
 /// </summary>
 public static class AddressRules
 {
@@ -20,6 +21,13 @@ public static class AddressRules
         if (chain.IsEvm)
         {
             if (!EvmHex.TryNormalizeAddress(text, out canonical) || canonical == ZeroAddress)
+                return false;
+            key = canonical;
+            return true;
+        }
+        if (chain.IsNear)
+        {
+            if (!NearAccountId.TryNormalize(text, out canonical))
                 return false;
             key = canonical;
             return true;
@@ -49,7 +57,9 @@ public static class AddressRules
             {
                 error = chain.IsEvm
                     ? $"Address {result.Count + 1} is not a valid {chain.DisplayName} address. A mixed-case address must have a correct checksum, so check it for typing errors."
-                    : $"Address {result.Count + 1} is not a valid {chain.DisplayName} address.";
+                    : chain.IsNear
+                        ? $"Address {result.Count + 1} is not a NEAR account id: 2 to 64 characters of lowercase letters, digits, - and _ in parts separated by dots (shop.near), or the 64 hex digits of an implicit account."
+                        : $"Address {result.Count + 1} is not a valid {chain.DisplayName} address.";
                 return false;
             }
             if (!seen.Add(key))

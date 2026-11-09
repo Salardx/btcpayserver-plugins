@@ -55,19 +55,25 @@ public class ChainPaymentMethodHandler<TPlugin>(
         context.Prompt.Details = JObject.FromObject(new ChainPaymentPromptDetails { PaymentLinkFormat = config.PaymentLinkFormat }, Serializer);
     }
 
-    public Task ValidatePaymentMethodConfig(PaymentMethodConfigValidationContext validationContext)
+    /// <summary>Every address must be well formed and, where the chain can say so, able to receive this method.</summary>
+    public async Task ValidatePaymentMethodConfig(PaymentMethodConfigValidationContext validationContext)
     {
         var config = ParsePaymentMethodConfig(validationContext.Config);
         if (!AddressRules.TryNormalizeAll(Chain, config.Addresses, out var normalized, out var error))
+        {
             validationContext.ModelState.AddModelError(nameof(config.Addresses), error!);
+        }
         else
+        {
             config.Addresses = normalized;
+            if (await DestinationChecks.FirstProblemAsync(rpc.GetClient(Chain.Id), normalized, Method, CancellationToken.None) is { } problem)
+                validationContext.ModelState.AddModelError(nameof(config.Addresses), problem);
+        }
         if (!Enum.IsDefined(config.PaymentLinkFormat))
             validationContext.ModelState.AddModelError(nameof(config.PaymentLinkFormat), "Unknown payment link format.");
         var previous = validationContext.PreviousConfig is null ? null : ParsePaymentMethodConfig(validationContext.PreviousConfig);
         config.PreserveActivationFrom(previous);
         validationContext.Config = JToken.FromObject(config, Serializer);
-        return Task.CompletedTask;
     }
 
     object IPaymentMethodHandler.ParsePaymentMethodConfig(JToken config) => ParsePaymentMethodConfig(config);

@@ -17,7 +17,7 @@ public sealed record PaymentMethodDefinition
     /// coin. Empty means "no contract on this network": the method is dropped unless configuration supplies one.
     /// </summary>
     public required string TokenHash { get; init; }
-    /// <summary>Decimals on chain (18 for most EVM tokens, 8 for GAS on Neo N3).</summary>
+    /// <summary>Decimals on chain (18 for most EVM tokens, 8 for GAS on Neo N3, 24 for NEAR).</summary>
     public required int Decimals { get; init; }
     /// <summary>Decimals shown to the customer; amounts are kept at this precision so they stay readable.</summary>
     public required int Divisibility { get; init; }
@@ -34,7 +34,7 @@ public sealed record PaymentMethodDefinition
 public sealed record ChainDefinition
 {
     public required string Id { get; init; }
-    /// <summary><see cref="ChainProfile.NeoN3"/> or <see cref="ChainProfile.Evm"/>.</summary>
+    /// <summary><see cref="ChainProfile.NeoN3"/>, <see cref="ChainProfile.Evm"/> or <see cref="ChainProfile.Near"/>.</summary>
     public required string Kind { get; init; }
     public required string DisplayName { get; init; }
     public required string NetworkLabel { get; init; }
@@ -52,7 +52,8 @@ public sealed record ChainDefinition
     public required IReadOnlyList<PaymentMethodDefinition> PaymentMethods { get; init; }
 
     public bool IsEvm => Kind == ChainProfile.Evm;
-    public string AddressPlaceholder => IsEvm ? "0x..." : "N...";
+    public bool IsNear => Kind == ChainProfile.Near;
+    public string AddressPlaceholder => IsEvm ? "0x..." : IsNear ? "shop.near" : "N...";
 
     public PaymentMethodId PaymentMethodId(PaymentMethodDefinition method) => new($"{method.Currency}-{Id}");
 
@@ -67,6 +68,9 @@ public sealed record ChainDefinition
         BlockExplorerLink.Replace("{0}", "{tx}"), FinalityBlocks, JsonRpcUris);
 }
 
+/// <summary>The plugin's page where a customer pays from a wallet in the browser; the checkout links to it and puts it in the QR code.</summary>
+public sealed record PayPageRoute(string Controller, string Action);
+
 /// <summary>What a plugin tells the shared services about itself.</summary>
 public sealed record ChainPluginDefinition
 {
@@ -78,6 +82,8 @@ public sealed record ChainPluginDefinition
     /// <summary>Folder of the plugin's partial views under Views/Shared ("Neo" gives "Neo/StoreNav").</summary>
     public required string ViewPrefix { get; init; }
     public required IReadOnlyList<ChainDefinition> Chains { get; init; }
+    /// <summary>Set when the plugin serves a pay page; chains without a wallet link standard (NEAR) send the customer there.</summary>
+    public PayPageRoute? PayPage { get; init; }
 }
 
 /// <summary>Server-wide override of the JSON-RPC endpoint for one chain.</summary>
