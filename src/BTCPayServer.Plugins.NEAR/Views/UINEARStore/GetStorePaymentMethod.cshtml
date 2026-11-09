@@ -32,7 +32,7 @@
                 <button type="submit" role="button" class="btn btn-primary text-nowrap flex-grow-1 flex-sm-grow-0">Add account(s)</button>
             </div>
             <span asp-validation-for="Address" class="text-danger"></span>
-            <div class="form-text">Several accounts can be separated by commas or new lines. A named account must exist on NEAR @Model.ChainDisplayName.ToLowerInvariant() already; an implicit account (64 hex digits) is created by its first payment.</div>
+            <div class="form-text">Several accounts can be separated by commas or new lines. A named account must already exist on this network; an implicit account (64 hex digits) is created by its first payment.</div>
         </form>
         @if (Model.Addresses.Any())
         {

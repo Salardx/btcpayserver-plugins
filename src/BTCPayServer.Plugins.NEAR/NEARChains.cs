@@ -13,12 +13,14 @@ namespace BTCPayServer.Plugins.NEAR;
 /// </summary>
 public static class NEARChains
 {
-    /// <summary>NEAR trades on Binance against BTC and USDT; the dollar tokens are quoted on Kraken; everything else goes through BTC or USD.</summary>
+    /// <summary>
+    /// NEAR is quoted in USD on Coinbase, which answers from anywhere (Binance refuses US addresses, and BTCPay's Kraken
+    /// source reads a fixed list of pairs without NEAR); the dollar tokens are quoted on Kraken; everything else goes through USD.
+    /// </summary>
     internal static readonly string[] NearRateRules =
     [
-        "NEAR_BTC = binance(NEAR_BTC)",
-        "NEAR_USDT = binance(NEAR_USDT)",
-        "NEAR_X = NEAR_BTC * BTC_X",
+        "NEAR_USD = coinbasepro(NEAR_USD)",
+        "NEAR_X = NEAR_USD * USD_X",
     ];
 
     internal static readonly string[] UsdcRateRules =

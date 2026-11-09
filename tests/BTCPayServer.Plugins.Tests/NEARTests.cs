@@ -40,7 +40,7 @@ public class NEARTests
         Assert.Equal(0.6, chain.BlockTimeSeconds);
         Assert.Equal(3, chain.JsonRpcUris.Length);
         Assert.Equal("https://nearblocks.io/txns/abc", string.Format(chain.BlockExplorerLink, "abc"));
-        Assert.Contains("NEAR_BTC = binance(NEAR_BTC)", Method(chain, "NEAR").RateRules);
+        Assert.Contains("NEAR_USD = coinbasepro(NEAR_USD)", Method(chain, "NEAR").RateRules);
         Assert.StartsWith("data:image/svg+xml;base64,", chain.CryptoImagePath);
 
         var profile = chain.ToChainProfile();

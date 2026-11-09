@@ -44,18 +44,29 @@ async function api(method, path, body) {
   return response.status === 204 ? null : response.json();
 }
 
-/** The payment method becomes available once the listener has reached the tip, up to a minute after it is enabled. */
+/**
+ * The payment method becomes available once the listener has reached the tip, up to two minutes after it is enabled;
+ * until then BTCPay answers 400 ("payment method unavailable") or leaves the method out of the invoice. Keep asking.
+ */
 async function invoiceWhenReady(paymentMethodId, currency, amount) {
   for (let attempt = 1; attempt <= 40; attempt++) {
-    const invoice = await api("POST", `/api/v1/stores/${store.id}/invoices`, {
-      amount,
-      currency,
-      checkout: { paymentMethods: [paymentMethodId], lazyPaymentMethods: false, expirationMinutes: 30 },
-    });
+    let invoice;
+    try {
+      invoice = await api("POST", `/api/v1/stores/${store.id}/invoices`, {
+        amount,
+        currency,
+        checkout: { paymentMethods: [paymentMethodId], lazyPaymentMethods: false, expirationMinutes: 30 },
+      });
+    } catch (error) {
+      if (!/-> 400 /.test(String(error))) throw error;
+      log(`${paymentMethodId} not available yet (attempt ${attempt}); waiting`);
+      await sleep(6000);
+      continue;
+    }
     const methods = await api("GET", `/api/v1/stores/${store.id}/invoices/${invoice.id}/payment-methods`);
     const method = methods.find((m) => m.paymentMethodId === paymentMethodId);
     if (method) return { invoice, method };
-    log(`${paymentMethodId} not available yet (attempt ${attempt}); waiting`);
+    log(`${paymentMethodId} missing from the invoice (attempt ${attempt}); waiting`);
     await api("DELETE", `/api/v1/stores/${store.id}/invoices/${invoice.id}`).catch(() => {});
     await sleep(6000);
   }
@@ -75,6 +86,14 @@ log("creating the store");
 const store = await api("POST", "/api/v1/stores", { name: "NEAR demo store" });
 await api("PUT", `/api/v1/stores/${store.id}/payment-methods/NEAR-NEAR`, { enabled: true, config: { addresses: [shop] } });
 if (usdc) await api("PUT", `/api/v1/stores/${store.id}/payment-methods/USDC-NEAR`, { enabled: true, config: { addresses: [shop] } });
+
+const steps = [
+  { pmi: "NEAR-NEAR", currency: "NEAR", amount: nearAmount, payArgs: ["--amount", nearAmount] },
+  ...(usdc ? [{ pmi: "USDC-NEAR", currency: "USDC", amount: usdcAmount, payArgs: ["--amount", usdcAmount, "--token", usdc] }] : []),
+];
+// The first invoice waits for the listener before the browser opens, so the recording has no dead time.
+log(`invoice for ${steps[0].amount} ${steps[0].currency}`);
+steps[0].ready = await invoiceWhenReady(steps[0].pmi, steps[0].currency, steps[0].amount);
 
 const browser = await chromium.launch();
 const context = await browser.newContext({
@@ -100,12 +119,12 @@ try {
   await sleep(2500);
   await shot("store-near-settings");
 
-  for (const step of [
-    { pmi: "NEAR-NEAR", currency: "NEAR", amount: nearAmount, payArgs: ["--amount", nearAmount] },
-    ...(usdc ? [{ pmi: "USDC-NEAR", currency: "USDC", amount: usdcAmount, payArgs: ["--amount", usdcAmount, "--token", usdc] }] : []),
-  ]) {
-    log(`invoice for ${step.amount} ${step.currency}`);
-    const { invoice, method } = await invoiceWhenReady(step.pmi, step.currency, step.amount);
+  for (const step of steps) {
+    if (!step.ready) {
+      log(`invoice for ${step.amount} ${step.currency}`);
+      step.ready = await invoiceWhenReady(step.pmi, step.currency, step.amount);
+    }
+    const { invoice, method } = step.ready;
     await page.goto(`${base}/i/${invoice.id}`);
     await page.waitForSelector("#PayInWallet", { timeout: 60000 });
     await sleep(2500);
