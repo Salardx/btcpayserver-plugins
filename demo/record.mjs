@@ -152,8 +152,11 @@ try {
     await shot(`checkout-paid-${step.currency}`);
 
     await page.goto(`${base}/invoices/${invoice.id}`);
-    await page.getByText("NEAR payments").first().waitFor({ timeout: 30000 });
-    await sleep(4000);
+    const payments = page.getByText("NEAR payments").first();
+    await payments.waitFor({ timeout: 30000 });
+    await sleep(2000);
+    await payments.scrollIntoViewIfNeeded();
+    await sleep(3000);
     await shot(`invoice-${step.currency}`);
   }
   summary.ok = true;

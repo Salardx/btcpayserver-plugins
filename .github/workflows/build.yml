@@ -148,10 +148,11 @@ jobs:
         if: always()
         working-directory: demo
         run: |
+          command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
           for f in out/*/demo.webm; do
-            if [ -f "$f" ]; then ffmpeg -loglevel error -y -i "$f" -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${f%.webm}.mp4" || true; fi
+            if [ -f "$f" ]; then ffmpeg -loglevel error -y -i "$f" -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${f%.webm}.mp4"; fi
           done
-          ls -la out/* || true
+          ls -la out/*
       - uses: actions/upload-artifact@v4
         if: always()
         with:
