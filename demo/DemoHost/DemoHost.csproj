@@ -22,4 +22,10 @@
     <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- CVE-2026-118747 (GHSA-vmv3-wvjp-wqpj): BTCPay Server 2.4.7 brings System.Formats.Cbor 9.0.0 through Fido2 4.3.1;
+         the BTCPay Server run here uses the patched build. Remove once the submodule carries the fix. -->
+    <PackageReference Include="System.Formats.Cbor" Version="9.0.24" />
+  </ItemGroup>
+
 </Project>
