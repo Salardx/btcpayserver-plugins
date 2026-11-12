@@ -7,7 +7,6 @@ Watch-only payment methods for [BTCPay Server](https://btcpayserver.org): a stor
 | `BTCPayServer.Plugins.Neo` | `GAS-NEO` (Neo N3), `GAS-NEOX` (Neo X) | preview |
 | `BTCPayServer.Plugins.BNBChain` | `BNB-BSC`, `USDT-BSC`, `USDC-BSC` (BNB Smart Chain, BEP-20) | preview |
 | `BTCPayServer.Plugins.NEAR` | `NEAR-NEAR`, `USDC-NEAR`, `USDT-NEAR` (NEAR Protocol, NEP-141) | preview, built for the [NEAR Hackathon](#near-hackathon-entry) |
-| Stellar | XLM and USDC on Stellar | planned |
 
 **Status: preview.** The plugins build against BTCPay Server 2.4.7, and in CI a real BTCPay Server takes invoices from creation to settlement on every chain against fake nodes, including a restart. They have not yet carried a merchant's traffic. The chain layer comes from [neo-payment-watcher](https://github.com/Salardx/neo-payment-watcher), rewarded in COZ Proof of Working 2.16 and 2.17.
 
