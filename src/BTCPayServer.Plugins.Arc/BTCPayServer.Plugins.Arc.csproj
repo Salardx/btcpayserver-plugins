@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- No static web assets of our own, and none collected from BTCPay Server: with the switch set here instead of
+         as a global property on the reference, every BTCPay project builds once (the plugin-builder hit a file race). -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>BTCPayServer.Plugins.Arc</RootNamespace>
+    <Product>Arc Payment Watcher</Product>
+    <Description>Accept USDC and EURC on Arc straight to your own wallet. Watch-only: no node, no keys, no custody.</Description>
+    <Version>0.1.0</Version>
+    <Authors>Salardx</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\arc.svg" LogicalName="BTCPayServer.Plugins.Arc.arc.svg" />
+    <ProjectReference Include="..\BTCPayServer.Plugins.Chains\BTCPayServer.Plugins.Chains.csproj" />
+    <!-- Referencing BTCPay Server must not copy any of its artifacts into the published plugin. -->
+    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BTCPayServer.Plugins.Tests" />
+  </ItemGroup>
+
+  <!-- BTCPay Server's own assemblies arrive transitively through the shared core; the host provides them, so they stay out of the package. -->
+  <Target Name="StripBTCPayServerAssemblies" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="$([System.String]::Copy('%(Filename)').StartsWith('BTCPayServer.')) And !$([System.String]::Copy('%(Filename)').StartsWith('BTCPayServer.Plugins.'))" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <!-- CVE-2026-118747 (GHSA-vmv3-wvjp-wqpj): BTCPay Server 2.4.7 brings System.Formats.Cbor 9.0.0 through Fido2 4.3.1.
+         Pinned to the patched build; the host supplies the assembly at runtime, so none of it goes into the plugin package.
+         Remove once the BTCPay Server submodule carries the fix. -->
+    <PackageReference Include="System.Formats.Cbor" Version="9.0.24" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

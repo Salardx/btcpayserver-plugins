@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Plugins.Chains.Evm;
 using BTCPayServer.Plugins.Chains.Near;
+using BTCPayServer.Plugins.Chains.Solana;
 using NeoPaymentWatcher.Chains;
 using NeoPaymentWatcher.Chains.Evm;
 using NeoPaymentWatcher.Neo;
@@ -69,8 +71,10 @@ public sealed class ChainRpcProvider<TPlugin> where TPlugin : class
 
     IChainClient Create(ChainDefinition chain) => chain.Kind switch
     {
+        ChainProfile.Evm when chain.NativeTransferLog is not null => new EvmLogChainClient(chain.ToChainProfile(), loggers.CreateLogger<EvmLogChainClient>()),
         ChainProfile.Evm => new EvmChainClient(chain.ToChainProfile(), loggers.CreateLogger<EvmChainClient>()),
         ChainProfile.Near => new NearChainClient(chain.ToChainProfile(), loggers.CreateLogger<NearChainClient>()),
+        ChainProfile.Solana => new SolanaChainClient(chain.ToChainProfile(), loggers.CreateLogger<SolanaChainClient>()),
         _ => new NeoChainClient(chain.ToChainProfile(), loggers.CreateLogger<NeoChainClient>()),
     };
 

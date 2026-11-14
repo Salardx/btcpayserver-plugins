@@ -6,11 +6,16 @@ namespace NeoPaymentWatcher.Chains.Evm;
 
 public sealed record NativeCandidate(string TxId, string From, string To, BigInteger Value);
 
+/// <summary>A Transfer log into a watched address, with the block it says it is in.</summary>
+public sealed record TransferLog(string TxId, int LogIndex, uint BlockIndex, string TokenHash, string From, string To, BigInteger Amount);
+
 /// <summary>
 /// Pure parsing of what an EVM node returns. ERC-20 payments come from <c>Transfer</c> logs, which only
 /// exist for transactions that succeeded. Native-coin payments come from a block's transactions, and
 /// those need their receipt checked by the caller: a failed transaction moves nothing. Native coin sent
 /// by a contract (an "internal transfer") never shows up in a block's transaction list; see the README.
+/// A chain whose coin announces every movement with a Transfer log of its own (USDC on Arc) is read from
+/// those logs instead, which covers plain transfers and contract-made ones alike.
 /// </summary>
 public static class EvmTransfers
 {
@@ -38,17 +43,32 @@ public static class EvmTransfers
         return candidates;
     }
 
+    /// <summary>The Transfer logs of one block, stamped with that block's index and time.</summary>
     public static List<TokenTransfer> ParseLogs(
-        JsonElement logs, uint blockIndex, long blockTime, IReadOnlySet<string> watchedKeys, IReadOnlySet<string> tokenHashes)
+        JsonElement logs, uint blockIndex, long blockTime, IReadOnlySet<string> watchedKeys, IReadOnlySet<string> tokenHashes) =>
+        ParseTransferLogs(logs, watchedKeys, tokenHashes)
+            .Select(log => new TokenTransfer(log.TxId, log.LogIndex, blockIndex, blockTime, log.TokenHash, log.From, log.To, log.Amount))
+            .ToList();
+
+    /// <summary>
+    /// Transfer logs into the watched addresses from the whitelisted tokens. A log from <paramref name="nativeTransferLog"/>
+    /// is a movement of the chain's own coin and is reported as such.
+    /// </summary>
+    public static List<TransferLog> ParseTransferLogs(
+        JsonElement logs, IReadOnlySet<string> watchedKeys, IReadOnlySet<string> tokenHashes, string? nativeTransferLog = null)
     {
-        var transfers = new List<TokenTransfer>();
+        var transfers = new List<TransferLog>();
         if (logs.ValueKind != JsonValueKind.Array)
             return transfers;
         foreach (var log in logs.EnumerateArray())
         {
             if (log.TryGetProperty("removed", out var removed) && removed.ValueKind == JsonValueKind.True)
                 continue;
-            if (!EvmHex.TryNormalizeAddress(Text(log, "address"), out var token) || !tokenHashes.Contains(token))
+            if (!EvmHex.TryNormalizeAddress(Text(log, "address"), out var token))
+                continue;
+            if (nativeTransferLog is not null && token == nativeTransferLog)
+                token = TokenRegistry.Native;
+            if (!tokenHashes.Contains(token))
                 continue;
             if (!log.TryGetProperty("topics", out var topics) || topics.ValueKind != JsonValueKind.Array || topics.GetArrayLength() != 3)
                 continue;   // ERC-20 Transfer indexes both parties; ERC-721 adds a fourth topic for the token id
@@ -62,8 +82,8 @@ public static class EvmTransfers
             if (amount.Sign <= 0)
                 continue;
 
-            transfers.Add(new TokenTransfer(Text(log, "transactionHash")!, (int)EvmHex.ToInt64(Text(log, "logIndex")),
-                blockIndex, blockTime, token, from, to, amount));
+            transfers.Add(new TransferLog(Text(log, "transactionHash")!, (int)EvmHex.ToInt64(Text(log, "logIndex")),
+                (uint)EvmHex.ToInt64(Text(log, "blockNumber")), token, from, to, amount));
         }
         return transfers;
     }

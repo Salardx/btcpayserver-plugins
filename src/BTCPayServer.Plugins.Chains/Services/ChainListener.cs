@@ -5,8 +5,8 @@ using Microsoft.Extensions.Hosting;
 namespace BTCPayServer.Plugins.Chains.Services;
 
 /// <summary>
-/// Follows each chain from where it left off, looking only at the addresses that are reserved by an invoice. With
-/// nothing reserved it just moves the cursor: a payment can only land in a block made after its invoice existed.
+/// Follows each chain from where it left off, looking only at the addresses and currencies of invoices that can
+/// still be paid. With none it just moves the cursor: a payment can only land in a block made after its invoice existed.
 /// Most chains are read block by block; a chain whose client is an <see cref="IRangeScanner"/> is read a span at
 /// a time and polled at the pace the client asks for. On chains with probabilistic finality the listener stays
 /// <see cref="ChainDefinition.FinalityBlocks"/> behind the tip, so what it records is final. One advisory lock
@@ -118,10 +118,17 @@ public sealed class ChainListener<TPlugin>(
         if (state.LastBlockIndex >= ceiling)
             return new Turn(false, true);
 
+        // Only what an open invoice waits for is read: its addresses, and the currencies with an open invoice.
         var watched = new HashSet<string>(StringComparer.Ordinal);
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
         foreach (var method in chain.PaymentMethods)
-            foreach (var claim in await allocator.CurrentClaims(chain.PaymentMethodId(method)))
+        {
+            var claims = await allocator.OpenClaims(chain.PaymentMethodId(method));
+            if (claims.Length > 0)
+                tokens.Add(method.TokenHash);
+            foreach (var claim in claims)
                 watched.Add(claim.Key);
+        }
         if (watched.Count == 0)
         {
             state.LastBlockIndex = ceiling;
@@ -130,7 +137,6 @@ public sealed class ChainListener<TPlugin>(
             return new Turn(true, true);
         }
 
-        var tokens = chain.TokenHashes();
         if (client is IRangeScanner ranged)
         {
             var span = Math.Min(ceiling, state.LastBlockIndex + ranged.MaxBlocksPerRange);

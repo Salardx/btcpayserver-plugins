@@ -5,6 +5,8 @@ namespace NeoPaymentWatcher.Chains;
 /// <summary>
 /// Everything chain-specific the watcher needs at runtime, resolved once at startup from
 /// <c>Watcher:Chain</c>, <c>Watcher:Network</c> and the overrides in <see cref="WatcherOptions"/>.
+/// <c>NativeTransferLog</c> is set on an EVM chain whose own coin announces every movement with a Transfer log
+/// (USDC on Arc): the lowercase address those logs come from.
 /// </summary>
 public sealed record ChainProfile(
     string Kind,
@@ -17,22 +19,28 @@ public sealed record ChainProfile(
     int NativeDecimals,
     string? ExplorerTx,
     int Confirmations,
-    string[] RpcUrls)
+    string[] RpcUrls,
+    string? NativeTransferLog = null)
 {
     public const string NeoN3 = "neo-n3";
     public const string Evm = "evm";
     public const string Near = "near";
+    public const string Solana = "solana";
 
     public bool IsEvm => Kind == Evm;
 
     public bool IsNear => Kind == Near;
+
+    public bool IsSolana => Kind == Solana;
 
     /// <summary>Pins a database to one network. Neo N3 keeps its magic number, so databases from before multi-chain support still open.</summary>
     public string NetworkKey => IsEvm
         ? $"evm:{ChainId!.Value.ToString(CultureInfo.InvariantCulture)}"
         : IsNear
             ? $"near:{Network}"
-            : NetworkMagic!.Value.ToString(CultureInfo.InvariantCulture);
+            : IsSolana
+                ? $"solana:{Network}"
+                : NetworkMagic!.Value.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>"Neo X · testnet", as the checkout page shows it.</summary>
     public string Label => $"{DisplayName} · {NetworkLabel}";

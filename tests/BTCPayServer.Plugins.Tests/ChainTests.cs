@@ -196,6 +196,30 @@ public class ChainTests
     }
 
     [Fact]
+    public void The_listener_watches_a_claim_only_while_its_invoice_can_still_be_paid()
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_794_000_000);
+        var closes = now.AddHours(1);
+
+        Assert.True(AddressAllocator.IsOpen(closes, saved: true, "New", now));
+        Assert.True(AddressAllocator.IsOpen(closes, saved: true, "Processing", now));
+        Assert.True(AddressAllocator.IsOpen(closes, saved: true, "Expired", now));                               // paid late still counts
+        Assert.True(AddressAllocator.IsOpen(now.AddMinutes(-10), saved: true, "Expired", now));                  // within the grace after the window
+        Assert.False(AddressAllocator.IsOpen(now.AddMinutes(-20), saved: true, "Expired", now));
+        Assert.False(AddressAllocator.IsOpen(closes, saved: true, "Settled", now));
+        Assert.False(AddressAllocator.IsOpen(closes, saved: true, "Invalid", now));
+
+        // An invoice that is being created has its claim before it is saved; one that never got saved lets go when its window would have closed.
+        Assert.True(AddressAllocator.IsOpen(closes, saved: false, null, now));
+        Assert.False(AddressAllocator.IsOpen(now.AddMinutes(-1), saved: false, null, now));
+
+        // Not enough to tell: a claim without its time, a status of some later version. The invoice itself is asked then.
+        Assert.Null(AddressAllocator.IsOpen(null, saved: true, "New", now));
+        Assert.Null(AddressAllocator.IsOpen(closes, saved: true, "Refunding", now));
+        Assert.Null(AddressAllocator.IsOpen(closes, saved: true, "7", now));
+    }
+
+    [Fact]
     public void Rate_limit_errors_are_recognised_through_inner_exceptions()
     {
         Assert.True(ChainListener<NeoPlugin>.IsRateLimit(new InvalidOperationException("All RPC endpoints failed", new HttpRequestException("Response status code does not indicate success: 429 (Too Many Requests)."))));

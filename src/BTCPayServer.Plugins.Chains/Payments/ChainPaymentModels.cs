@@ -2,7 +2,7 @@ namespace BTCPayServer.Plugins.Chains.Payments;
 
 public enum PaymentLinkFormat
 {
-    /// <summary>NEP-9 on Neo N3, EIP-681 on EVM chains: wallets that understand it prefill the amount.</summary>
+    /// <summary>NEP-9 on Neo N3, EIP-681 on EVM chains, Solana Pay on Solana: wallets that understand it prefill the amount.</summary>
     Standard = 0,
     /// <summary>The bare address; the customer types the amount.</summary>
     AddressOnly = 2,
@@ -32,6 +32,9 @@ public class ChainPaymentMethodConfig
 public class ChainPaymentPromptDetails
 {
     public PaymentLinkFormat PaymentLinkFormat { get; set; } = PaymentLinkFormat.Standard;
+
+    /// <summary>On a chain that matches by reference: what the paying wallet adds to its transfer so that the payment finds this invoice.</summary>
+    public string? Reference { get; set; }
 }
 
 /// <summary>What a recorded payment remembers. Payments are recorded from final blocks only, so the count never needs to grow.</summary>

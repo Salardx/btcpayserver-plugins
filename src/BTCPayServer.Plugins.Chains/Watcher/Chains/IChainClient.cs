@@ -4,7 +4,11 @@ namespace NeoPaymentWatcher.Chains;
 
 public sealed record TokenInfo(string Hash, string Symbol, int Decimals);
 
-/// <summary>A token transfer into a watched address, as recorded on chain. NotifyIndex is the notification or log index; -1 is a native-coin transfer.</summary>
+/// <summary>
+/// A token transfer into a watched address, as recorded on chain. NotifyIndex tells apart the transfers of one
+/// transaction: the notification or log index; -1 for a native-coin transfer read from a block's transaction list;
+/// on Solana the position of the receiving account among the transaction's accounts.
+/// </summary>
 public sealed record TokenTransfer(
     string TxId,
     int NotifyIndex,

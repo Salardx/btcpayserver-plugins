@@ -72,22 +72,11 @@ internal abstract class FakeJsonRpcNode : IAsyncDisposable
                     continue;
                 }
                 using var reader = new StreamReader(context.Request.InputStream);
-                var request = JObject.Parse(await reader.ReadToEndAsync());
-                var reply = new JObject { ["jsonrpc"] = "2.0", ["id"] = request["id"] };
-                try
-                {
-                    reply["result"] = Reply(request["method"]!.Value<string>()!, request["params"]) ?? JValue.CreateNull();
-                }
-                catch (RpcError e)
-                {
-                    var error = new JObject { ["code"] = e.Code, ["message"] = e.Message };
-                    if (e.Name is not null)
-                        error["name"] = e.Name;
-                    if (e.Cause is not null)
-                        error["cause"] = new JObject { ["name"] = e.Cause };
-                    reply["error"] = error;
-                    context.Response.StatusCode = ErrorStatusCode;
-                }
+                var body = JToken.Parse(await reader.ReadToEndAsync());
+                // A batch is answered call by call, in one response, like a real node does.
+                JToken reply = body is JArray batch
+                    ? new JArray(batch.Select(call => Answer((JObject)call, context)))
+                    : Answer((JObject)body, context);
                 var bytes = Encoding.UTF8.GetBytes(reply.ToString());
                 context.Response.ContentType = "application/json";
                 await context.Response.OutputStream.WriteAsync(bytes);
@@ -101,6 +90,26 @@ internal abstract class FakeJsonRpcNode : IAsyncDisposable
                 context.Response.Close();
             }
         }
+    }
+
+    JObject Answer(JObject request, HttpListenerContext context)
+    {
+        var reply = new JObject { ["jsonrpc"] = "2.0", ["id"] = request["id"] };
+        try
+        {
+            reply["result"] = Reply(request["method"]!.Value<string>()!, request["params"]) ?? JValue.CreateNull();
+        }
+        catch (RpcError e)
+        {
+            var error = new JObject { ["code"] = e.Code, ["message"] = e.Message };
+            if (e.Name is not null)
+                error["name"] = e.Name;
+            if (e.Cause is not null)
+                error["cause"] = new JObject { ["name"] = e.Cause };
+            reply["error"] = error;
+            context.Response.StatusCode = ErrorStatusCode;
+        }
+        return reply;
     }
 
     public async ValueTask DisposeAsync()

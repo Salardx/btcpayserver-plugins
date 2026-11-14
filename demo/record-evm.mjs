@@ -2,20 +2,51 @@
 // Server with the plugin): a store is created over the Greenfield API with the payment method on the given address,
 // an invoice is opened in the checkout, a real testnet payment is sent with pay-evm.mjs, the checkout turns paid, and
 // the invoice's payment list is shown. One page, one video (webm) plus screenshots, under out/.
-// The defaults are the BNB Chain plugin on the BNB Smart Chain testnet.
 //
 //   BTCPAY_URL, BTCPAY_EMAIL, BTCPAY_PASSWORD   or DEMO_HOST_FILE pointing at DemoHost's demo-host.json (default: ./demo-host.json)
+//   EVM_PRESET                                  which plugin and testnet: bnb (default), arc, avalanche or flare
 //   EVM_SHOP                                    the address that receives
-//   EVM_PAYER_KEY                               the payer's testnet key, for pay-evm.mjs (with EVM_CHAIN_ID and EVM_RPC when not BNB testnet)
-//   EVM_TOKEN                                   optional: a token contract the server watches (DemoHost: BSC_USDT_CONTRACT); adds a token invoice
-//   EVM_PLUGIN (bnbchain), EVM_PLUGIN_NAME (BNB Chain), EVM_COIN (BNB), EVM_COIN_METHOD (BNB-BSC),
-//   EVM_TOKEN_CURRENCY (USDT), EVM_TOKEN_METHOD (USDT-BSC), EVM_TOKEN_DECIMALS (18),
-//   EVM_EXPLORER_TX (https://testnet.bscscan.com/tx/{tx}), DEMO_COIN_AMOUNT (0.01), DEMO_TOKEN_AMOUNT (5)
+//   EVM_PAYER_KEY                               the payer's testnet key, for pay-evm.mjs
+//
+// The second invoice of each preset is in a token; it is left out when the payer holds too little of it.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+
+/**
+ * A preset names the plugin's pages, the testnet, and two invoices: one in the chain's coin and one in a token.
+ * `invoiceCurrency` prices the coin invoice in another currency, which the plugin then converts at its own rate
+ * (on Flare: dollars, converted by the FTSO oracle). The token contracts are the ones the plugin watches on that
+ * testnet by default, except on BNB Smart Chain, where DemoHost is started with BSC_USDT_CONTRACT set to this one.
+ */
+const PRESETS = {
+  bnb: {
+    plugin: "bnbchain", pluginName: "BNB Chain", chainId: "97", rpc: "https://bsc-testnet-rpc.publicnode.com",
+    explorer: "https://testnet.bscscan.com/tx/{tx}",
+    coin: { method: "BNB-BSC", currency: "BNB", amount: "0.001" },
+    token: { method: "USDT-BSC", currency: "USDT", amount: "5", contract: "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd", decimals: "18" },
+  },
+  arc: {
+    plugin: "arc", pluginName: "Arc", chainId: "5042002", rpc: "https://rpc.testnet.arc.io",
+    explorer: "https://explorer.testnet.arc.io/tx/{tx}",
+    coin: { method: "USDC-ARC", currency: "USDC", amount: "1" },
+    token: { method: "EURC-ARC", currency: "EURC", amount: "1", contract: "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a", decimals: "6" },
+  },
+  avalanche: {
+    plugin: "avalanche", pluginName: "Avalanche", chainId: "43113", rpc: "https://api.avax-test.network/ext/bc/C/rpc",
+    explorer: "https://testnet.snowtrace.io/tx/{tx}",
+    coin: { method: "AVAX-AVAXC", currency: "AVAX", amount: "0.01" },
+    token: { method: "USDC-AVAXC", currency: "USDC", amount: "1", contract: "0x5425890298aed601595a70AB815c96711a31Bc65", decimals: "6" },
+  },
+  flare: {
+    plugin: "flare", pluginName: "Flare", chainId: "114", rpc: "https://coston2-api.flare.network/ext/C/rpc",
+    explorer: "https://coston2-explorer.flare.network/tx/{tx}",
+    coin: { method: "FLR-FLARE", currency: "FLR", amount: "0.10", invoiceCurrency: "USD" },
+    token: { method: "FXRP-FLARE", currency: "FXRP", amount: "1", contract: "0x0b6A3645c240605887a5532109323A3E12273dc7", decimals: "6" },
+  },
+};
 
 const here = dirname(fileURLToPath(import.meta.url));
 const hostFile = process.env.DEMO_HOST_FILE ?? join(process.cwd(), "demo-host.json");
@@ -24,21 +55,16 @@ const base = (process.env.BTCPAY_URL ?? hostInfo.url ?? "").replace(/\/$/, "");
 const email = process.env.BTCPAY_EMAIL ?? hostInfo.email;
 const password = process.env.BTCPAY_PASSWORD ?? hostInfo.password;
 const shop = process.env.EVM_SHOP;
-const token = process.env.EVM_TOKEN;
-const plugin = process.env.EVM_PLUGIN ?? "bnbchain";
-const pluginName = process.env.EVM_PLUGIN_NAME ?? "BNB Chain";
-const coin = process.env.EVM_COIN ?? "BNB";
-const coinMethod = process.env.EVM_COIN_METHOD ?? "BNB-BSC";
-const tokenCurrency = process.env.EVM_TOKEN_CURRENCY ?? "USDT";
-const tokenMethod = process.env.EVM_TOKEN_METHOD ?? "USDT-BSC";
-const tokenDecimals = process.env.EVM_TOKEN_DECIMALS ?? "18";
-const explorer = process.env.EVM_EXPLORER_TX ?? "https://testnet.bscscan.com/tx/{tx}";
-const coinAmount = process.env.DEMO_COIN_AMOUNT ?? "0.01";
-const tokenAmount = process.env.DEMO_TOKEN_AMOUNT ?? "5";
+const preset = PRESETS[process.env.EVM_PRESET || "bnb"];
+if (!preset) {
+  console.error(`EVM_PRESET must be one of: ${Object.keys(PRESETS).join(", ")}`);
+  process.exit(2);
+}
 if (!base || !email || !password || !shop || !process.env.EVM_PAYER_KEY) {
   console.error("record-evm.mjs needs BTCPAY_URL/EMAIL/PASSWORD (or demo-host.json), EVM_SHOP and EVM_PAYER_KEY");
   process.exit(2);
 }
+const { plugin, pluginName, explorer } = preset;
 const out = join(here, "out", new Date().toISOString().replace(/[:.]/g, "-"));
 mkdirSync(out, { recursive: true });
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -84,27 +110,35 @@ async function invoiceWhenReady(paymentMethodId, currency, amount) {
   throw new Error(`${paymentMethodId} never became available`);
 }
 
-function pay(args) {
+/** Runs pay-evm.mjs on the preset's testnet and returns the JSON line it prints. */
+function payer(args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [join(here, "pay-evm.mjs"), ...args], { env: process.env, stdio: ["ignore", "pipe", "inherit"] });
+    const env = { ...process.env, EVM_CHAIN_ID: preset.chainId, EVM_RPC: process.env.EVM_RPC || preset.rpc };
+    const child = spawn(process.execPath, [join(here, "pay-evm.mjs"), ...args], { env, stdio: ["ignore", "pipe", "inherit"] });
     let output = "";
     child.stdout.on("data", (d) => (output += d));
     child.on("close", (code) => (code === 0 ? resolve(JSON.parse(output.trim().split("\n").pop())) : reject(new Error(`pay-evm.mjs exited with ${code}`))));
   });
 }
 
+const balances = await payer(["--show", "balances", "--token", preset.token.contract, "--decimals", preset.token.decimals]);
+log(`payer ${balances.payer} holds ${balances.coin} ${preset.coin.currency} and ${balances.token} ${preset.token.currency}`);
+const withToken = Number(balances.token) >= Number(preset.token.amount);
+if (!withToken) log(`too little ${preset.token.currency} for the token invoice; recording the ${preset.coin.currency} invoice only`);
+
 log("creating the store");
 const store = await api("POST", "/api/v1/stores", { name: `${pluginName} demo store` });
-await api("PUT", `/api/v1/stores/${store.id}/payment-methods/${coinMethod}`, { enabled: true, config: { addresses: [shop] } });
-if (token) await api("PUT", `/api/v1/stores/${store.id}/payment-methods/${tokenMethod}`, { enabled: true, config: { addresses: [shop] } });
+await api("PUT", `/api/v1/stores/${store.id}/payment-methods/${preset.coin.method}`, { enabled: true, config: { addresses: [shop] } });
+if (withToken) await api("PUT", `/api/v1/stores/${store.id}/payment-methods/${preset.token.method}`, { enabled: true, config: { addresses: [shop] } });
 
 const steps = [
-  { pmi: coinMethod, currency: coin, amount: coinAmount, payArgs: ["--amount", coinAmount] },
-  ...(token ? [{ pmi: tokenMethod, currency: tokenCurrency, amount: tokenAmount, payArgs: ["--amount", tokenAmount, "--token", token, "--decimals", tokenDecimals] }] : []),
+  { ...preset.coin, payArgs: [] },
+  ...(withToken ? [{ ...preset.token, payArgs: ["--token", preset.token.contract, "--decimals", preset.token.decimals] }] : []),
 ];
+const priced = (step) => `${step.amount} ${step.invoiceCurrency ?? step.currency}`;
 // The first invoice waits for the listener before the browser opens, so the recording has no dead time.
-log(`invoice for ${steps[0].amount} ${steps[0].currency}`);
-steps[0].ready = await invoiceWhenReady(steps[0].pmi, steps[0].currency, steps[0].amount);
+log(`invoice for ${priced(steps[0])}`);
+steps[0].ready = await invoiceWhenReady(steps[0].method, steps[0].invoiceCurrency ?? steps[0].currency, steps[0].amount);
 
 const browser = await chromium.launch();
 const context = await browser.newContext({
@@ -114,7 +148,7 @@ const context = await browser.newContext({
 const page = await context.newPage();
 let shots = 0;
 const shot = async (name) => page.screenshot({ path: join(out, `${String(++shots).padStart(2, "0")}-${name}.png`) });
-const summary = { base, store: store.id, payments: [] };
+const summary = { base, preset: process.env.EVM_PRESET || "bnb", store: store.id, payments: [] };
 
 try {
   log("logging in");
@@ -125,15 +159,15 @@ try {
   await page.waitForLoadState("networkidle");
 
   log("store settings");
-  await page.goto(`${base}/stores/${store.id}/${plugin}/${coinMethod}`);
+  await page.goto(`${base}/stores/${store.id}/${plugin}/${preset.coin.method}`);
   await page.getByText("payment settings").first().waitFor();
   await sleep(2500);
   await shot(`store-${plugin}-settings`);
 
   for (const step of steps) {
     if (!step.ready) {
-      log(`invoice for ${step.amount} ${step.currency}`);
-      step.ready = await invoiceWhenReady(step.pmi, step.currency, step.amount);
+      log(`invoice for ${priced(step)}`);
+      step.ready = await invoiceWhenReady(step.method, step.invoiceCurrency ?? step.currency, step.amount);
     }
     const { invoice, method } = step.ready;
     await page.goto(`${base}/i/${invoice.id}`);
@@ -141,8 +175,9 @@ try {
     await sleep(3000);
     await shot(`checkout-${step.currency}`);
 
-    log("sending the payment on testnet to", method.destination);
-    const payment = await pay(["--to", method.destination, ...step.payArgs]);
+    // What the checkout asks for: the invoice's amount, or its conversion at the plugin's rate.
+    log(`sending ${method.due} ${step.currency} on testnet to`, method.destination);
+    const payment = await payer(["--to", method.destination, "--amount", String(method.due), ...step.payArgs]);
     const sentAt = Date.now();
     log("sent", payment.hash, "in block", payment.height);
 
@@ -150,7 +185,10 @@ try {
     await page.waitForSelector("#settled", { timeout: 150000 });
     const seconds = Math.round((Date.now() - sentAt) / 100) / 10;
     log(`checkout paid ${seconds} s after the transaction was mined`);
-    summary.payments.push({ invoice: invoice.id, ...payment, explorer: explorer.replace("{tx}", payment.hash), paidAfterSeconds: seconds });
+    summary.payments.push({
+      invoice: invoice.id, invoiced: priced(step), paid: `${method.due} ${step.currency}`, rate: method.rate,
+      ...payment, explorer: explorer.replace("{tx}", payment.hash), paidAfterSeconds: seconds,
+    });
     await sleep(2500);
     await shot(`checkout-paid-${step.currency}`);
 

@@ -1,6 +1,7 @@
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Plugins.Chains.Services;
+using BTCPayServer.Plugins.Chains.Solana;
 using BTCPayServer.Services.Rates;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -46,14 +47,34 @@ public class ChainPaymentMethodHandler<TPlugin>(
         if (!rpc.IsAvailable(Chain.Id))
             throw new PaymentMethodUnavailableException($"The {Chain.DisplayName} node is not available or the listener is behind.");
         var config = ParsePaymentMethodConfig(context.PaymentMethodConfig);
-        var address = await allocator.Allocate(Chain, PaymentMethodId, context.Store.Id, context.InvoiceEntity.Id, config.Addresses,
+        string address;
+        string? reference = null;
+        if (SharesAddresses(Chain, config.PaymentLinkFormat))
+        {
+            // The wallet link carries a reference, so the payment names its invoice and nothing has to be reserved.
+            (address, reference) = await allocator.AllocateShared(Chain, PaymentMethodId, context.Store.Id, context.InvoiceEntity.Id, config.Addresses,
+                                       SolanaAddress.NewReference, context.InvoiceEntity.InvoiceTime, context.InvoiceEntity.MonitoringExpiration)
+                                   ?? throw new PaymentMethodUnavailableException($"This store has no {Method.DisplayName} address.");
+        }
+        else
+        {
+            address = await allocator.Allocate(Chain, PaymentMethodId, context.Store.Id, context.InvoiceEntity.Id, config.Addresses,
                           context.InvoiceEntity.InvoiceTime, context.InvoiceEntity.MonitoringExpiration)
                       ?? throw new PaymentMethodUnavailableException(
                           $"Every {Method.DisplayName} address of this store is reserved by an open invoice. Add addresses, or wait for one to free up.");
+        }
         context.Prompt.Destination = address;
         context.Prompt.PaymentMethodFee = 0;
-        context.Prompt.Details = JObject.FromObject(new ChainPaymentPromptDetails { PaymentLinkFormat = config.PaymentLinkFormat }, Serializer);
+        context.Prompt.Details = JObject.FromObject(new ChainPaymentPromptDetails { PaymentLinkFormat = config.PaymentLinkFormat, Reference = reference }, Serializer);
     }
+
+    /// <summary>
+    /// Open invoices share an address when the chain matches payments by reference and the store hands out the wallet
+    /// link that carries one. With the bare address as link no wallet can add a reference, so each invoice reserves
+    /// an address of its own, as on the other chains.
+    /// </summary>
+    public static bool SharesAddresses(ChainDefinition chain, PaymentLinkFormat format) =>
+        chain.MatchesByReference && format == PaymentLinkFormat.Standard;
 
     /// <summary>Every address must be well formed and, where the chain can say so, able to receive this method.</summary>
     public async Task ValidatePaymentMethodConfig(PaymentMethodConfigValidationContext validationContext)

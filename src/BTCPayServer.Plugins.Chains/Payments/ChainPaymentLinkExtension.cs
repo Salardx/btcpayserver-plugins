@@ -13,7 +13,8 @@ namespace BTCPayServer.Plugins.Chains.Payments;
 
 /// <summary>
 /// The link behind the QR code: NEP-9 on Neo N3, EIP-681 on EVM chains (with the token's transfer call for tokens),
-/// the plugin's pay page on NEAR (which has no wallet link standard), or the bare address.
+/// a Solana Pay transfer request on Solana (with the invoice's reference), the plugin's pay page on NEAR (which has
+/// no wallet link standard), or the bare address.
 /// </summary>
 public class ChainPaymentLinkExtension(PaymentMethodId paymentMethodId, ChainDefinition chain, PaymentMethodDefinition method, PayPageRoute? payPage = null) : IPaymentLinkExtension
 {
@@ -35,8 +36,12 @@ public class ChainPaymentLinkExtension(PaymentMethodId paymentMethodId, ChainDef
             if (!string.IsNullOrEmpty(link))
                 return link;
         }
-        return Build(Chain, Method, prompt.Destination, prompt.Calculate().Due, format);
+        return Build(Chain, Method, prompt.Destination, prompt.Calculate().Due, format, ReadReference(prompt.Details));
     }
+
+    /// <summary>The reference stored with the prompt, on chains that have one.</summary>
+    internal static string? ReadReference(JToken? details) =>
+        details is JObject && details["reference"] is JValue { Type: JTokenType.String } reference ? reference.Value<string>() : null;
 
     /// <summary>The format stored with the prompt, as a number or a name; anything unreadable means the default.</summary>
     internal static PaymentLinkFormat ReadFormat(JToken? details)
@@ -53,7 +58,7 @@ public class ChainPaymentLinkExtension(PaymentMethodId paymentMethodId, ChainDef
     }
 
     /// <summary>The wallet link for the chain; on NEAR, which has none, the account id itself.</summary>
-    public static string? Build(ChainDefinition chain, PaymentMethodDefinition method, string? destination, decimal due, PaymentLinkFormat format)
+    public static string? Build(ChainDefinition chain, PaymentMethodDefinition method, string? destination, decimal due, PaymentLinkFormat format, string? reference = null)
     {
         if (string.IsNullOrEmpty(destination))
             return null;
@@ -62,7 +67,7 @@ public class ChainPaymentLinkExtension(PaymentMethodId paymentMethodId, ChainDef
         var amount = due.ToString(CultureInfo.InvariantCulture);
         var units = ToBaseUnits(due, method.Decimals);
         var token = new TokenInfo(method.TokenHash, method.Currency, method.Decimals);
-        return PaymentUris.Build(chain.ToChainProfile(), destination, token, units, amount);
+        return PaymentUris.Build(chain.ToChainProfile(), destination, token, units, amount, reference);
     }
 
     public static BigInteger ToBaseUnits(decimal due, int decimals)
@@ -98,7 +103,9 @@ public class ChainCheckoutModelExtension(
         context.Model.InvoiceBitcoinUrl = link;
         context.Model.InvoiceBitcoinUrlQR = link;
         // A wallet link is opened by scanning the QR code; a pay page is a web address, so the button that opens it stays.
-        context.Model.ShowPayInWalletButton = link is not null && link.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+        // A Solana Pay link also opens the wallet app on the phone the checkout is shown on.
+        context.Model.ShowPayInWalletButton = link is not null
+            && (link.StartsWith("http", StringComparison.OrdinalIgnoreCase) || link.StartsWith("solana:", StringComparison.Ordinal));
         context.Model.PaymentMethodCurrency = currencyDisplayName;
     }
 }

@@ -47,6 +47,32 @@ public sealed class JsonRpcClient(string[] urls, ILogger logger)
         throw new InvalidOperationException($"All RPC endpoints failed for {method}.", lastError);
     }
 
+    /// <summary>
+    /// Several calls in one HTTP request; the results come back in the order asked. A failed batch is retried on the
+    /// next configured endpoint. A call the node answers with an error fails the batch, unless
+    /// <paramref name="tolerant"/> is set: then that call's result is left undefined and the others stand.
+    /// </summary>
+    public async Task<JsonElement[]> CallBatchAsync(IReadOnlyList<(string Method, object?[] Parameters)> calls, CancellationToken ct, bool tolerant = false)
+    {
+        Exception? lastError = null;
+        for (var attempt = 0; attempt < urls.Length; attempt++)
+        {
+            var index = (preferred + attempt) % urls.Length;
+            try
+            {
+                var results = await BatchOnceAsync(urls[index], calls, tolerant, ct);
+                preferred = index;
+                return results;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                lastError = ex;
+                logger.LogWarning("RPC batch of {Method} on {Host} failed: {Error}", calls[^1].Method, Host(urls[index]), ex.Message);
+            }
+        }
+        throw new InvalidOperationException($"All RPC endpoints failed for a batch of {calls[^1].Method}.", lastError);
+    }
+
     /// <summary>The JSON-RPC error behind a failed call, if that is what it was, wherever it sits in the chain of causes.</summary>
     public static JsonRpcException? RpcError(Exception exception)
     {
@@ -80,16 +106,58 @@ public sealed class JsonRpcClient(string[] urls, ILogger logger)
         {
             var root = document.RootElement;
             if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
-            {
-                var cause = error.TryGetProperty("cause", out var c) && c.ValueKind == JsonValueKind.Object ? Text(c, "name") : null;
-                throw new JsonRpcException(method,
-                    error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.Number ? code.GetInt32() : 0,
-                    Text(error, "message"), Text(error, "name"), cause);
-            }
+                throw Error(method, error);
             response.EnsureSuccessStatusCode();
             return root.GetProperty("result").Clone();
         }
     }
+
+    async Task<JsonElement[]> BatchOnceAsync(string url, IReadOnlyList<(string Method, object?[] Parameters)> calls, bool tolerant, CancellationToken ct)
+    {
+        var body = calls.Select((call, id) => new { jsonrpc = "2.0", id, method = call.Method, @params = call.Parameters }).ToArray();
+        using var response = await HttpClientJsonExtensions.PostAsJsonAsync(http, url, body, ct);
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        JsonDocument document;
+        try
+        {
+            document = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        }
+        catch (JsonException) when (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}).");
+        }
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var refused) && refused.ValueKind == JsonValueKind.Object)
+                throw Error(calls[^1].Method, refused);
+            response.EnsureSuccessStatusCode();
+            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != calls.Count)
+                throw new InvalidOperationException("The node did not answer every call of the batch.");
+            var results = new JsonElement[calls.Count];
+            var answered = new bool[calls.Count];
+            foreach (var item in root.EnumerateArray())
+            {
+                var id = item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var number) && number.ValueKind == JsonValueKind.Number ? number.GetInt32() : -1;
+                if (id < 0 || id >= calls.Count || answered[id])
+                    throw new InvalidOperationException("The node answered the batch with an id that was not asked.");
+                answered[id] = true;
+                if (item.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+                {
+                    if (!tolerant)
+                        throw Error(calls[id].Method, error);
+                    continue;
+                }
+                results[id] = item.GetProperty("result").Clone();
+            }
+            return results;
+        }
+    }
+
+    static JsonRpcException Error(string method, JsonElement error) => new(method,
+        error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.Number ? code.GetInt32() : 0,
+        Text(error, "message"), Text(error, "name"),
+        error.TryGetProperty("cause", out var cause) && cause.ValueKind == JsonValueKind.Object ? Text(cause, "name") : null);
 
     static string? Text(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

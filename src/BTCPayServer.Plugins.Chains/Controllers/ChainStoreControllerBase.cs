@@ -56,6 +56,7 @@ public abstract class ChainStoreControllerBase<TPlugin> : Controller where TPlug
             Currency = method.Currency,
             IsEvm = chain.IsEvm,
             IsNear = chain.IsNear,
+            SharesAddresses = ChainPaymentMethodHandler<TPlugin>.SharesAddresses(chain, config.PaymentLinkFormat),
             Address = "",
             Enabled = saved is not null && !excluded.Match(paymentMethodId),
             PaymentLinkFormat = config.PaymentLinkFormat,

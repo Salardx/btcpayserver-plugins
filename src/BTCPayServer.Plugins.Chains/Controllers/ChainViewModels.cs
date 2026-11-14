@@ -12,6 +12,8 @@ public class EditChainPaymentMethodViewModel
     public required string Currency { get; init; }
     public required bool IsEvm { get; init; }
     public bool IsNear { get; init; }
+    /// <summary>Whether open invoices share an address under the current link format (a chain that matches by reference, with its wallet link).</summary>
+    public bool SharesAddresses { get; init; }
     public string? Address { get; init; }
     public bool Enabled { get; init; }
     public PaymentLinkFormat PaymentLinkFormat { get; init; } = PaymentLinkFormat.Standard;

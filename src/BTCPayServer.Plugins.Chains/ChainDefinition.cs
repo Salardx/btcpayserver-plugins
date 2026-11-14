@@ -13,11 +13,12 @@ public sealed record PaymentMethodDefinition
     /// <summary>"GAS on Neo N3": the name shown in menus and on the checkout.</summary>
     public required string DisplayName { get; init; }
     /// <summary>
-    /// The token contract in the chain's lowercase form, or <see cref="TokenRegistry.Native"/> for the chain's own
-    /// coin. Empty means "no contract on this network": the method is dropped unless configuration supplies one.
+    /// The token contract as the chain spells it (lowercase where addresses are hex; the mint address on Solana), or
+    /// <see cref="TokenRegistry.Native"/> for the chain's own coin. Empty means "no contract on this network": the
+    /// method is dropped unless configuration supplies one.
     /// </summary>
     public required string TokenHash { get; init; }
-    /// <summary>Decimals on chain (18 for most EVM tokens, 8 for GAS on Neo N3, 24 for NEAR).</summary>
+    /// <summary>Decimals on chain (18 for most EVM tokens, 8 for GAS on Neo N3, 24 for NEAR, 9 for SOL).</summary>
     public required int Decimals { get; init; }
     /// <summary>Decimals shown to the customer; amounts are kept at this precision so they stay readable.</summary>
     public required int Divisibility { get; init; }
@@ -34,7 +35,7 @@ public sealed record PaymentMethodDefinition
 public sealed record ChainDefinition
 {
     public required string Id { get; init; }
-    /// <summary><see cref="ChainProfile.NeoN3"/>, <see cref="ChainProfile.Evm"/> or <see cref="ChainProfile.Near"/>.</summary>
+    /// <summary><see cref="ChainProfile.NeoN3"/>, <see cref="ChainProfile.Evm"/>, <see cref="ChainProfile.Near"/> or <see cref="ChainProfile.Solana"/>.</summary>
     public required string Kind { get; init; }
     public required string DisplayName { get; init; }
     public required string NetworkLabel { get; init; }
@@ -49,11 +50,23 @@ public sealed record ChainDefinition
     public double BlockTimeSeconds { get; init; } = 15;
     /// <summary>How many blocks the listener stays behind the tip. Zero on dBFT chains, where a block is final when it exists.</summary>
     public int FinalityBlocks { get; init; }
+    /// <summary>
+    /// On an EVM chain whose own coin announces every movement with an ERC-20 style Transfer log (USDC on Arc): the
+    /// lowercase address those logs come from. The listener then reads the coin's payments from logs, a span of
+    /// blocks per call, and also sees coin sent by a contract, which a block's transaction list does not show.
+    /// </summary>
+    public string? NativeTransferLog { get; init; }
     public required IReadOnlyList<PaymentMethodDefinition> PaymentMethods { get; init; }
 
     public bool IsEvm => Kind == ChainProfile.Evm;
     public bool IsNear => Kind == ChainProfile.Near;
-    public string AddressPlaceholder => IsEvm ? "0x..." : IsNear ? "shop.near" : "N...";
+    public bool IsSolana => Kind == ChainProfile.Solana;
+    /// <summary>
+    /// Whether a payment can name its invoice, as a Solana Pay transfer does with its reference. Open invoices of
+    /// such a chain can share one address; elsewhere every open invoice needs an address of its own.
+    /// </summary>
+    public bool MatchesByReference => IsSolana;
+    public string AddressPlaceholder => IsEvm ? "0x..." : IsNear ? "shop.near" : IsSolana ? "Wallet address" : "N...";
 
     public PaymentMethodId PaymentMethodId(PaymentMethodDefinition method) => new($"{method.Currency}-{Id}");
 
@@ -65,7 +78,7 @@ public sealed record ChainDefinition
     /// <summary>What the vendored chain clients need.</summary>
     public ChainProfile ToChainProfile() => new(
         Kind, NetworkLabel, DisplayName, NetworkLabel, ChainId, NetworkMagic, NativeSymbol, NativeDecimals,
-        BlockExplorerLink.Replace("{0}", "{tx}"), FinalityBlocks, JsonRpcUris);
+        BlockExplorerLink.Replace("{0}", "{tx}"), FinalityBlocks, JsonRpcUris, NativeTransferLog);
 }
 
 /// <summary>The plugin's page where a customer pays from a wallet in the browser; the checkout links to it and puts it in the QR code.</summary>

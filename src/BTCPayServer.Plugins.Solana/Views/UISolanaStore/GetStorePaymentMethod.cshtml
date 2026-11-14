@@ -1,0 +1,155 @@
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.Chains.Payments
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Microsoft.AspNetCore.Routing
+@model BTCPayServer.Plugins.Chains.Controllers.EditChainPaymentMethodViewModel
+@{
+    var paymentMethodId = Context.GetRouteValue("paymentMethodId")?.ToString();
+    ViewData.SetLayoutModel(new LayoutModel(Model.PluginNavKey, $"{Model.DisplayName} payment settings") { SubMenuItemId = paymentMethodId }
+        .SetCategory(WellKnownCategories.Store));
+}
+<h3 class="mb-3">@Model.DisplayName payment settings</h3>
+<div class="row">
+    <div class="col-md-6">
+        <div asp-validation-summary="All"></div>
+    </div>
+</div>
+<partial name="_StatusMessage" />
+<div class="row">
+    <div class="col-md-8">
+        @if (Model.SharesAddresses)
+        {
+            <p class="mb-0">
+                Payments go straight to your own Solana wallet. The checkout shows a Solana Pay code; the customer's wallet scans it and adds the invoice's reference to the transfer, and the payment is matched by that reference. So one address is enough for any number of open invoices: the first address in the list receives them all.
+            </p>
+        }
+        else
+        {
+            <p class="mb-0">
+                Payments go straight to these Solana wallets, which only you control. With the address-only link each open invoice reserves one address until it is paid or expires, so list several.
+            </p>
+        }
+        <form method="post"
+              asp-route-storeId="@Context.GetRouteValue("storeId")"
+              asp-route-paymentMethodId="@Context.GetRouteValue("paymentMethodId")"
+              class="mt-4" enctype="multipart/form-data">
+            <input type="hidden" name="command" value="add-addresses" />
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <input asp-for="Address" type="text" class="form-control" placeholder="@Model.AddressPlaceholder" style="flex: 1 1 14rem">
+                <button type="submit" role="button" class="btn btn-primary text-nowrap flex-grow-1 flex-sm-grow-0">Add address(es)</button>
+            </div>
+            <span asp-validation-for="Address" class="text-danger"></span>
+            <div class="form-text">The address of the wallet itself, as the wallet shows it, not of a token account. Several addresses can be separated by commas or new lines.</div>
+        </form>
+        @if (Model.Addresses.Any())
+        {
+            <table class="table table-hover table-responsive-md">
+                <thead>
+                <tr>
+                    <th>Address</th>
+                    @if (Model.SharesAddresses)
+                    {
+                        <th>Use</th>
+                    }
+                    else
+                    {
+                        <th><span data-bs-toggle="tooltip" data-bs-placement="top" title="An address is reserved while an invoice using it can still be paid.">Free or reserved? <vc:icon symbol="info" /></span></th>
+                    }
+                    <th class="actions-col" permission="@Policies.CanModifyStoreSettings">Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @for (var i = 0; i < Model.Addresses.Length; i++)
+                {
+                    var address = Model.Addresses[i];
+                    <tr>
+                        <td class="text-break">
+                            @address.Value
+                            @if (address.Note is not null)
+                            {
+                                <div class="form-text text-warning">@address.Note</div>
+                            }
+                        </td>
+                        @if (Model.SharesAddresses)
+                        {
+                            <td>@(i == 0 ? "Receives the payments" : "Spare")</td>
+                        }
+                        else
+                        {
+                            <td class="text-center">
+                                <span class="me-2 btcpay-status btcpay-status--@(address.Available ? "enabled" : "disabled")"></span>
+                            </td>
+                        }
+                        <td class="actions-col" permission="@Policies.CanModifyStoreSettings">
+                            <form method="post" asp-action="DeleteAddress"
+                                  asp-route-storeId="@Context.GetRouteValue("storeId")"
+                                  asp-route-paymentMethodId="@Context.GetRouteValue("paymentMethodId")"
+                                  asp-route-address="@address.Value"
+                                  enctype="multipart/form-data">
+                                <input class="btn btn-link p-0" type="submit" value="Remove" />
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            @if (Model.SharesAddresses)
+            {
+                <div class="alert alert-warning" role="alert">
+                    A transfer typed by hand or sent from an exchange carries no reference. It still reaches your wallet, but no invoice is marked paid by it. If your customers pay that way, choose the address-only link below and list one address per invoice you expect to be open at the same time.
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-warning" role="alert">
+                    Keep these addresses for this store only. A transfer from anywhere else lands on whichever invoice holds the address at that moment.
+                </div>
+            }
+        }
+        else
+        {
+            <br />
+            <div class="alert alert-info">Add at least one @Model.ChainDisplayName address before enabling this payment method.</div>
+        }
+        <div class="alert @(Model.NodeAvailable ? "alert-success" : "alert-secondary")" role="alert">
+            @if (Model.NodeAvailable)
+            {
+                <text>Node connected. Last slot scanned: @Model.LatestBlockScanned, newest final slot: @Model.LatestBlockOnNode.</text>
+            }
+            else if (Model.NodeError is not null)
+            {
+                <text>Node problem: @Model.NodeError</text>
+            }
+            else
+            {
+                <text>The chain is not being scanned yet. It starts within a minute of the first address being added.</text>
+            }
+        </div>
+        <form method="post"
+              asp-route-storeId="@Context.GetRouteValue("storeId")"
+              asp-route-paymentMethodId="@Context.GetRouteValue("paymentMethodId")" class="mt-4" enctype="multipart/form-data">
+            <div class="d-flex mb-3">
+                <input asp-for="Enabled" type="checkbox" class="btcpay-toggle me-3" />
+                <label asp-for="Enabled" class="form-check-label"></label>
+                <span asp-validation-for="Enabled" class="text-danger"></span>
+            </div>
+            <div class="form-group mb-3">
+                <label asp-for="PaymentLinkFormat" class="form-label">Payment link format</label>
+                <select asp-for="PaymentLinkFormat" class="form-select">
+                    <option value="@((int)PaymentLinkFormat.Standard)">Solana Pay link (wallets scan it and prefill the payment; open invoices share one address)</option>
+                    <option value="@((int)PaymentLinkFormat.AddressOnly)">Address only (any wallet or exchange can pay; each open invoice reserves one address)</option>
+                </select>
+                <span asp-validation-for="PaymentLinkFormat" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary" id="SaveButton">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section PageFootContent {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+}

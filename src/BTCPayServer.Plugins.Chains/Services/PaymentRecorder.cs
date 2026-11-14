@@ -12,7 +12,7 @@ namespace BTCPayServer.Plugins.Chains.Services;
 
 /// <summary>
 /// Turns a transfer the listener saw into a BTCPay payment. The token names the payment method; the invoice is the
-/// one holding the address at the block's time. The listener only hands over final blocks, so a payment is settled
+/// one holding the address at the block's time, or on a chain that matches by reference the one the reference names. The listener only hands over final blocks, so a payment is settled
 /// the moment it is recorded: there is no confirmation count to grow and no reorganisation to undo.
 /// </summary>
 public sealed class PaymentRecorder(
@@ -32,7 +32,7 @@ public sealed class PaymentRecorder(
         if (!handlers.TryGetValue(pmi, out var handler))
             return;
         var when = DateTimeOffset.FromUnixTimeMilliseconds(transfer.BlockTime);
-        if (!AddressRules.TryNormalize(chain, transfer.To, out var address, out var key))
+        if (!AddressRules.TryParseReceiver(chain, transfer.To, out var address, out var key))
             return;
         var invoice = await ResolveInvoice(pmi, address, key, when);
         if (invoice is null)
@@ -85,10 +85,18 @@ public sealed class PaymentRecorder(
         var prompt = invoice.GetPaymentPrompt(pmi);
         if (prompt?.Destination is null || !string.Equals(prompt.Destination, address, StringComparison.Ordinal))
             return null;
-        if (!AddressAllocator.ShouldReserve(invoice.Status, invoice.MonitoringExpiration + AddressAllocator.ReuseGrace, when))
-            return null;
-        return when.ToUnixTimeSeconds() >= invoice.InvoiceTime.ToUnixTimeSeconds() ? invoice : null;
+        return InPaymentWindow(invoice.Status, invoice.InvoiceTime, invoice.MonitoringExpiration, when, claim.Reference is not null) ? invoice : null;
     }
+
+    /// <summary>
+    /// Whether a transfer at <paramref name="when"/> can be the payment of an invoice: not after its payment window,
+    /// and, for an invoice that holds a reserved address, not before the invoice existed, because the address may
+    /// have served an earlier invoice. A reference was made for one invoice alone: what carries it is that invoice's
+    /// payment, also when the chain's clock and the server's are a few seconds apart.
+    /// </summary>
+    internal static bool InPaymentWindow(InvoiceStatus status, DateTimeOffset invoiceTime, DateTimeOffset monitoringExpiration, DateTimeOffset when, bool byReference) =>
+        AddressAllocator.ShouldReserve(status, monitoringExpiration + AddressAllocator.ReuseGrace, when)
+        && (byReference || when.ToUnixTimeSeconds() >= invoiceTime.ToUnixTimeSeconds());
 
     /// <summary>Unique per transfer: the transaction, the notification or log index within it, and the payment method.</summary>
     public static string PaymentId(PaymentMethodId pmi, TokenTransfer transfer) =>

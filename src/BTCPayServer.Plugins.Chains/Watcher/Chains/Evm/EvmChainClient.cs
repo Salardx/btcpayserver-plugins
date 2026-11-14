@@ -8,29 +8,29 @@ namespace NeoPaymentWatcher.Chains.Evm;
 /// block for native-coin payments (plus a receipt per candidate), and one <c>eth_getLogs</c> per block
 /// for the whitelisted ERC-20 tokens.
 /// </summary>
-public sealed class EvmChainClient(ChainProfile chain, ILogger<EvmChainClient> logger) : IChainClient
+public class EvmChainClient(ChainProfile chain, ILogger<EvmChainClient> logger) : IChainClient
 {
     const string SymbolSelector = "0x95d89b41";
     const string DecimalsSelector = "0x313ce567";
 
-    readonly JsonRpcClient rpc = new(chain.RpcUrls, logger);
+    protected JsonRpcClient Rpc { get; } = new(chain.RpcUrls, logger);
 
     public ChainProfile Chain { get; } = chain;
 
     public async Task VerifyNetworkAsync(CancellationToken ct)
     {
-        var chainId = EvmHex.ToInt64((await rpc.CallAsync("eth_chainId", [], ct)).GetString());
+        var chainId = EvmHex.ToInt64((await Rpc.CallAsync("eth_chainId", [], ct)).GetString());
         if (chainId != Chain.ChainId)
             throw new InvalidOperationException($"The RPC node is on chain {chainId}, but Watcher:Network is '{Chain.Network}' (chain {Chain.ChainId}).");
     }
 
     public async Task<uint> GetTipAsync(CancellationToken ct) =>
-        (uint)EvmHex.ToInt64((await rpc.CallAsync("eth_blockNumber", [], ct)).GetString());
+        (uint)EvmHex.ToInt64((await Rpc.CallAsync("eth_blockNumber", [], ct)).GetString());
 
-    public async Task<ScannedBlock> ScanBlockAsync(uint index, IReadOnlySet<string> watchedKeys, IReadOnlySet<string> tokenHashes, CancellationToken ct)
+    public virtual async Task<ScannedBlock> ScanBlockAsync(uint index, IReadOnlySet<string> watchedKeys, IReadOnlySet<string> tokenHashes, CancellationToken ct)
     {
         var number = EvmHex.Quantity(index);
-        var block = await rpc.CallAsync("eth_getBlockByNumber", [number, true], ct);
+        var block = await Rpc.CallAsync("eth_getBlockByNumber", [number, true], ct);
         if (block.ValueKind != JsonValueKind.Object)
             throw new InvalidOperationException($"Block {index} is not available from the node yet.");
         var hash = block.GetProperty("hash").GetString()!;
@@ -41,7 +41,7 @@ public sealed class EvmChainClient(ChainProfile chain, ILogger<EvmChainClient> l
         {
             foreach (var candidate in EvmTransfers.NativeCandidates(transactions, watchedKeys))
             {
-                var receipt = await rpc.CallAsync("eth_getTransactionReceipt", [candidate.TxId], ct);
+                var receipt = await Rpc.CallAsync("eth_getTransactionReceipt", [candidate.TxId], ct);
                 if (EvmTransfers.Succeeded(receipt, candidate.TxId, hash))
                     transfers.Add(EvmTransfers.Native(candidate, index, time));
             }
@@ -52,17 +52,16 @@ public sealed class EvmChainClient(ChainProfile chain, ILogger<EvmChainClient> l
         {
             // By hash, not by number: a node that does not have the block yet then answers with an error,
             // and the block is scanned again, instead of the empty list that would hide a payment.
-            var filter = new
-            {
-                blockHash = hash,
-                address = tokens,
-                topics = new object?[] { EvmTransfers.TransferTopic, null, watchedKeys.Select(EvmHex.AddressTopic).ToArray() },
-            };
-            var logs = await rpc.CallAsync("eth_getLogs", [filter], ct);
+            var filter = new { blockHash = hash, address = tokens, topics = TransferTopics(watchedKeys) };
+            var logs = await Rpc.CallAsync("eth_getLogs", [filter], ct);
             transfers.AddRange(EvmTransfers.ParseLogs(logs, index, time, watchedKeys, tokenHashes));
         }
         return new ScannedBlock(index, time, transfers);
     }
+
+    /// <summary>Transfer(from, to, value) with any sender and one of the watched addresses as receiver.</summary>
+    protected static object?[] TransferTopics(IReadOnlySet<string> watchedKeys) =>
+        [EvmTransfers.TransferTopic, null, watchedKeys.Select(EvmHex.AddressTopic).ToArray()];
 
     public async Task<TokenInfo> GetTokenInfoAsync(string tokenHash, CancellationToken ct)
     {
@@ -83,5 +82,5 @@ public sealed class EvmChainClient(ChainProfile chain, ILogger<EvmChainClient> l
     }
 
     async Task<string?> CallContractAsync(string contract, string selector, CancellationToken ct) =>
-        (await rpc.CallAsync("eth_call", [new { to = contract, data = selector }, "latest"], ct)).GetString();
+        (await Rpc.CallAsync("eth_call", [new { to = contract, data = selector }, "latest"], ct)).GetString();
 }

@@ -13,6 +13,10 @@ on:
         type: choice
         options:
           - near
+          - solana
+          - arc
+          - avalanche
+          - flare
           - bnb
         default: near
   schedule:
@@ -57,6 +61,10 @@ jobs:
           dotnet format src/BTCPayServer.Plugins.Neo --verify-no-changes --no-restore
           dotnet format src/BTCPayServer.Plugins.BNBChain --verify-no-changes --no-restore
           dotnet format src/BTCPayServer.Plugins.NEAR --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.Solana --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.Arc --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.Avalanche --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.Flare --verify-no-changes --no-restore
           dotnet format tests/BTCPayServer.Plugins.Tests --verify-no-changes --no-restore
           dotnet format demo/DemoHost --verify-no-changes --no-restore
       - uses: actions/setup-node@v4
@@ -82,7 +90,14 @@ jobs:
     needs: test
     strategy:
       matrix:
-        plugin: [BTCPayServer.Plugins.Neo, BTCPayServer.Plugins.BNBChain, BTCPayServer.Plugins.NEAR]
+        plugin:
+          - BTCPayServer.Plugins.Neo
+          - BTCPayServer.Plugins.BNBChain
+          - BTCPayServer.Plugins.NEAR
+          - BTCPayServer.Plugins.Solana
+          - BTCPayServer.Plugins.Arc
+          - BTCPayServer.Plugins.Avalanche
+          - BTCPayServer.Plugins.Flare
     env:
       DOTNET_NOLOGO: 1
       DOTNET_CLI_TELEMETRY_OPTOUT: 1
@@ -143,8 +158,10 @@ jobs:
   # The demo: BTCPay Server with the NEAR plugin on the NEAR testnet, an invoice paid from a throwaway testnet account,
   # recorded in a browser. On demand only; the accounts come from repository secrets (NEAR_DEMO_PAYER_ID,
   # NEAR_DEMO_PAYER_KEY, NEAR_DEMO_SHOP, optionally NEAR_DEMO_USDC with the testnet USDC contract when the payer holds test USDC).
-  # With the input demo=bnb the same job records the BNB Chain plugin on the BNB Smart Chain testnet instead: secrets
-  # BNB_DEMO_PAYER_KEY and BNB_DEMO_SHOP, optionally BNB_DEMO_USDT with a test token contract when the payer holds that token.
+  # The input picks another plugin and testnet instead:
+  #   solana                       Solana devnet, paid by the Solana Pay reference implementation: SOLANA_DEMO_PAYER_KEY, SOLANA_DEMO_SHOP
+  #   arc, avalanche, flare, bnb   Arc testnet, Avalanche Fuji, Flare Coston2, BNB Smart Chain testnet: EVM_DEMO_PAYER_KEY, EVM_DEMO_SHOP
+  # Each records an invoice in the chain's coin and, when the payer holds the test token, a second one in that token.
   demo:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -183,7 +200,8 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Start BTCPay Server with the plugins
         env:
-          BSC_USDT_CONTRACT: ${{ inputs.demo == 'bnb' && secrets.BNB_DEMO_USDT || '' }}
+          # The BNB Smart Chain testnet has no canonical USDT; this is the test token the recorder pays with.
+          BSC_USDT_CONTRACT: ${{ inputs.demo == 'bnb' && '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd' || '' }}
         run: |
           nohup dotnet run --project demo/DemoHost --no-build > demo-host.log 2>&1 &
           for i in $(seq 1 60); do
@@ -199,10 +217,12 @@ jobs:
           NEAR_PAYER_ID: ${{ secrets.NEAR_DEMO_PAYER_ID }}
           NEAR_PAYER_KEY: ${{ secrets.NEAR_DEMO_PAYER_KEY }}
           NEAR_USDC: ${{ secrets.NEAR_DEMO_USDC }}
-          EVM_SHOP: ${{ secrets.BNB_DEMO_SHOP }}
-          EVM_PAYER_KEY: ${{ secrets.BNB_DEMO_PAYER_KEY }}
-          EVM_TOKEN: ${{ secrets.BNB_DEMO_USDT }}
-        run: node ${{ inputs.demo == 'bnb' && 'record-evm.mjs' || 'record.mjs' }}
+          EVM_PRESET: ${{ inputs.demo }}
+          EVM_SHOP: ${{ secrets.EVM_DEMO_SHOP }}
+          EVM_PAYER_KEY: ${{ secrets.EVM_DEMO_PAYER_KEY }}
+          SOLANA_SHOP: ${{ secrets.SOLANA_DEMO_SHOP }}
+          SOLANA_PAYER_KEY: ${{ secrets.SOLANA_DEMO_PAYER_KEY }}
+        run: node ${{ inputs.demo == 'near' && 'record.mjs' || inputs.demo == 'solana' && 'record-solana.mjs' || 'record-evm.mjs' }}
       - name: Convert the video
         if: always()
         working-directory: demo

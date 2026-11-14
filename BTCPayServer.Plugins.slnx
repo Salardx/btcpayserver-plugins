@@ -21,6 +21,10 @@
     <Project Path="src/BTCPayServer.Plugins.Neo/BTCPayServer.Plugins.Neo.csproj" />
     <Project Path="src/BTCPayServer.Plugins.BNBChain/BTCPayServer.Plugins.BNBChain.csproj" />
     <Project Path="src/BTCPayServer.Plugins.NEAR/BTCPayServer.Plugins.NEAR.csproj" />
+    <Project Path="src/BTCPayServer.Plugins.Arc/BTCPayServer.Plugins.Arc.csproj" />
+    <Project Path="src/BTCPayServer.Plugins.Avalanche/BTCPayServer.Plugins.Avalanche.csproj" />
+    <Project Path="src/BTCPayServer.Plugins.Flare/BTCPayServer.Plugins.Flare.csproj" />
+    <Project Path="src/BTCPayServer.Plugins.Solana/BTCPayServer.Plugins.Solana.csproj" />
   </Folder>
   <Folder Name="/demo/">
     <Project Path="demo/DemoHost/DemoHost.csproj" />

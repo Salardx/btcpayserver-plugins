@@ -19,6 +19,10 @@
     <ProjectReference Include="..\..\src\BTCPayServer.Plugins.Neo\BTCPayServer.Plugins.Neo.csproj" />
     <ProjectReference Include="..\..\src\BTCPayServer.Plugins.BNBChain\BTCPayServer.Plugins.BNBChain.csproj" />
     <ProjectReference Include="..\..\src\BTCPayServer.Plugins.NEAR\BTCPayServer.Plugins.NEAR.csproj" />
+    <ProjectReference Include="..\..\src\BTCPayServer.Plugins.Solana\BTCPayServer.Plugins.Solana.csproj" />
+    <ProjectReference Include="..\..\src\BTCPayServer.Plugins.Arc\BTCPayServer.Plugins.Arc.csproj" />
+    <ProjectReference Include="..\..\src\BTCPayServer.Plugins.Avalanche\BTCPayServer.Plugins.Avalanche.csproj" />
+    <ProjectReference Include="..\..\src\BTCPayServer.Plugins.Flare\BTCPayServer.Plugins.Flare.csproj" />
     <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
   </ItemGroup>
 
