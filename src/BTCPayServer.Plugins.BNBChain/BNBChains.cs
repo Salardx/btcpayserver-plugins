@@ -48,8 +48,8 @@ public static class BNBChains
     };
 
     /// <summary>
-    /// Blocks come every 0.75 s since the Maxwell upgrade and are final after a few blocks with fast finality; the
-    /// listener stays six blocks (about five seconds) behind the tip and records payments as settled.
+    /// Blocks come every 0.45 s on mainnet and testnet (measured November 2026) and are final within a second with
+    /// fast finality; the listener stays six blocks (under three seconds) behind the tip and records payments as settled.
     /// </summary>
     internal static ChainDefinition SmartChain(bool mainnet) => new()
     {
@@ -65,7 +65,7 @@ public static class BNBChains
             : ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545"],
         BlockExplorerLink = mainnet ? "https://bscscan.com/tx/{0}" : "https://testnet.bscscan.com/tx/{0}",
         CryptoImagePath = Image,
-        BlockTimeSeconds = 0.75,
+        BlockTimeSeconds = 0.45,
         FinalityBlocks = 6,
         PaymentMethods =
         [
