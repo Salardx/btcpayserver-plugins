@@ -7,6 +7,14 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      demo:
+        description: Testnet demo to record
+        type: choice
+        options:
+          - near
+          - bnb
+        default: near
   schedule:
     # Mondays 05:23 UTC: the latest-btcpay job below, against BTCPay Server's newest release.
     - cron: "23 5 * * 1"
@@ -135,6 +143,8 @@ jobs:
   # The demo: BTCPay Server with the NEAR plugin on the NEAR testnet, an invoice paid from a throwaway testnet account,
   # recorded in a browser. On demand only; the accounts come from repository secrets (NEAR_DEMO_PAYER_ID,
   # NEAR_DEMO_PAYER_KEY, NEAR_DEMO_SHOP, optionally NEAR_DEMO_USDC with the testnet USDC contract when the payer holds test USDC).
+  # With the input demo=bnb the same job records the BNB Chain plugin on the BNB Smart Chain testnet instead: secrets
+  # BNB_DEMO_PAYER_KEY and BNB_DEMO_SHOP, optionally BNB_DEMO_USDT with a test token contract when the payer holds that token.
   demo:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -172,6 +182,8 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
       - name: Start BTCPay Server with the plugins
+        env:
+          BSC_USDT_CONTRACT: ${{ inputs.demo == 'bnb' && secrets.BNB_DEMO_USDT || '' }}
         run: |
           nohup dotnet run --project demo/DemoHost --no-build > demo-host.log 2>&1 &
           for i in $(seq 1 60); do
@@ -187,7 +199,10 @@ jobs:
           NEAR_PAYER_ID: ${{ secrets.NEAR_DEMO_PAYER_ID }}
           NEAR_PAYER_KEY: ${{ secrets.NEAR_DEMO_PAYER_KEY }}
           NEAR_USDC: ${{ secrets.NEAR_DEMO_USDC }}
-        run: node record.mjs
+          EVM_SHOP: ${{ secrets.BNB_DEMO_SHOP }}
+          EVM_PAYER_KEY: ${{ secrets.BNB_DEMO_PAYER_KEY }}
+          EVM_TOKEN: ${{ secrets.BNB_DEMO_USDT }}
+        run: node ${{ inputs.demo == 'bnb' && 'record-evm.mjs' || 'record.mjs' }}
       - name: Convert the video
         if: always()
         working-directory: demo
@@ -200,7 +215,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: near-demo
+          name: ${{ inputs.demo }}-demo
           path: |
             demo/out/
             demo-host.log
