@@ -40,6 +40,13 @@ public sealed class SolanaChainClient(ChainProfile chain, ILogger<SolanaChainCli
     /// <summary>The most signatures a node returns per call.</summary>
     const int PageSize = 1000;
 
+    /// <summary>
+    /// The newest transaction format this plugin reads. A node returns a transaction only to a client that names its
+    /// version or a newer one. Since September 2026 wallets send version 1 (SIMD-0385) next to version 0 and the
+    /// legacy format, and a node shows all three alike: the accounts, and every account's balance before and after.
+    /// </summary>
+    const int MaxTransactionVersion = 1;
+
     /// <summary>What a node answers when asked for a transaction of a newer version than the request names.</summary>
     const int UnsupportedTransactionVersion = -32015;
 
@@ -260,7 +267,7 @@ public sealed class SolanaChainClient(ChainProfile chain, ILogger<SolanaChainCli
         try
         {
             transaction = await rpc.CallAsync("getTransaction",
-                [signature, new { commitment = Finalized, maxSupportedTransactionVersion = 0, encoding = "json" }], ct);
+                [signature, new { commitment = Finalized, maxSupportedTransactionVersion = MaxTransactionVersion, encoding = "json" }], ct);
         }
         catch (Exception ex) when (JsonRpcClient.RpcError(ex) is { Code: UnsupportedTransactionVersion })
         {

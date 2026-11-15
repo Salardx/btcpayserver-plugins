@@ -54,15 +54,20 @@ function fromUnits(units, decimals) {
   return digits.slice(0, digits.length - decimals) + (fraction ? "." + fraction : "");
 }
 
+// A public node that throttles is asked again after a moment; any other refusal is final.
 async function rpc(method, params) {
-  const response = await fetch(nodeUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const json = await response.json();
-  if (json.error) throw new Error(`${method}: ${JSON.stringify(json.error)}`);
-  return json.result;
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(nodeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    const json = (await response.json().catch(() => null)) ?? { error: { code: response.status, message: `HTTP ${response.status}` } };
+    if (!json.error) return json.result;
+    const throttled = response.status === 429 || json.error.code === -32005 || /rate limit|too many requests/i.test(String(json.error.message));
+    if (!throttled || attempt === 6) throw new Error(`${method}: ${JSON.stringify(json.error)}`);
+    await sleep(1500 * attempt);
+  }
 }
 
 // RLP, as far as a transaction needs it: byte strings and lists of them; numbers are big-endian without leading zeros.
@@ -112,7 +117,8 @@ async function payInvoice() {
     gasLimit = (estimate * 3n) / 2n;
   }
 
-  const gasPrice = (BigInt(await rpc("eth_gasPrice", [])) * 5n) / 4n;
+  // Twice the node's quote: on some testnets the base fee moves between the quote and the block, and the margin costs a fraction of a test coin.
+  const gasPrice = BigInt(await rpc("eth_gasPrice", [])) * 2n;
   const balance = BigInt(await rpc("eth_getBalance", [payer, "latest"]));
   const needed = value + gasLimit * gasPrice;
   if (balance < needed) throw new Error(`the payer ${payer} holds ${balance} wei, the payment needs ${needed}`);

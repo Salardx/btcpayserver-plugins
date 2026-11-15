@@ -9,6 +9,7 @@ using BTCPayServer.Plugins.Chains.Services;
 using BTCPayServer.Plugins.Neo;
 using Microsoft.Extensions.Configuration;
 using NeoPaymentWatcher.Chains;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.Tests;
@@ -217,6 +218,20 @@ public class ChainTests
         Assert.Null(AddressAllocator.IsOpen(null, saved: true, "New", now));
         Assert.Null(AddressAllocator.IsOpen(closes, saved: true, "Refunding", now));
         Assert.Null(AddressAllocator.IsOpen(closes, saved: true, "7", now));
+    }
+
+    [Fact]
+    public void A_claim_stores_its_times_in_a_form_the_database_reads()
+    {
+        // Old rows are swept inside PostgreSQL by the end of the payment window, read from the stored claim: the
+        // field's name and its ISO 8601 form (which casts to timestamptz) are part of that statement's contract.
+        var closes = new DateTimeOffset(2026, 11, 15, 8, 30, 15, TimeSpan.Zero).AddTicks(1234567);
+        var claim = new AddressAllocator.Claim("store", "invoice", "address", "key", closes.AddHours(-25), closes, "reference");
+
+        var json = JsonConvert.SerializeObject(claim);
+
+        Assert.Contains("\"MonitoringExpiration\":\"2026-11-15T08:30:15.1234567+00:00\"", json);
+        Assert.Equal(claim, JsonConvert.DeserializeObject<AddressAllocator.Claim>(json));
     }
 
     [Fact]

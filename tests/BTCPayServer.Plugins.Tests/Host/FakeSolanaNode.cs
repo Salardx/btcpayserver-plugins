@@ -12,12 +12,17 @@ namespace BTCPayServer.Plugins.Tests.Host;
 /// with <c>before</c> and <c>minContextSlot</c>), getTransaction with the balances before and after, getAccountInfo
 /// and getMinimumBalanceForRentExemption. Transactions are indexed by every account they name, as on a real node, so
 /// a Solana Pay reference finds its payment and a token transfer is found at the token account, not at the wallet.
+/// A transaction of a numbered version is returned only to a client that names that version or a newer one.
 /// </summary>
 internal sealed class FakeSolanaNode : FakeJsonRpcNode
 {
     public const string Usdc = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
     public const string Devnet = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
     public const ulong RentExemptMinimum = 650_240;
+
+    /// <summary>What every account of a fake transaction holds before it: 1000 SOL, and a payer's token account 1,000,000 units of a 6-decimal token.</summary>
+    const long StartingLamports = 1_000_000_000_000;
+    const long StartingTokens = 1_000_000_000_000;
 
     sealed record Entry(string Signature, ulong Slot, long BlockTime, bool Failed, JObject Transaction);
 
@@ -113,7 +118,8 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
     /// A transfer of SOL in a new slot, as a wallet builds it from a Solana Pay request: payer, receiver, the references
     /// as extra accounts, the system program.
     /// </summary>
-    public ulong AddSolTransfer(out string signature, string from, string to, ulong lamports, string[]? references = null, bool failed = false, string? signedAlsoBy = null)
+    public ulong AddSolTransfer(out string signature, string from, string to, ulong lamports, string[]? references = null, bool failed = false, string? signedAlsoBy = null,
+        int? version = null)
     {
         lock (Gate)
         {
@@ -124,7 +130,9 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                 keys.Add(to);
             keys.AddRange(references ?? []);
             keys.Add(SolanaAddress.SystemProgram);
-            var before = keys.Select(_ => (BigInteger)1_000_000_000).ToArray();
+            if (lamports > StartingLamports / 2)
+                throw new ArgumentOutOfRangeException(nameof(lamports), "The fake payer does not hold that much.");
+            var before = keys.Select(_ => (BigInteger)StartingLamports).ToArray();
             var after = before.ToArray();
             after[0] -= 5000;
             if (!failed)
@@ -133,7 +141,7 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                 after[keys.IndexOf(to)] += lamports;
             }
             var meta = Meta(failed, before, after, [], []);
-            return Add(out signature, keys, signedAlsoBy is null ? 1 : 2, meta, failed);
+            return Add(out signature, keys, signedAlsoBy is null ? 1 : 2, meta, failed, version: version);
         }
     }
 
@@ -143,7 +151,7 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
     /// <paramref name="received"/> is what arrives when the token keeps a fee; by default all of it.
     /// </summary>
     public ulong AddTokenTransfer(out string signature, string mint, string fromWallet, string toWallet, ulong amount,
-        string[]? references = null, bool failed = false, ulong? received = null, bool referencesFromLookupTable = false)
+        string[]? references = null, bool failed = false, ulong? received = null, bool referencesFromLookupTable = false, int? version = null)
     {
         lock (Gate)
         {
@@ -161,6 +169,8 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
             var before = all.Select(_ => (BigInteger)2_039_280).ToArray();
             var after = before.ToArray();
             after[0] -= 5000;
+            if (amount > StartingTokens / 2)
+                throw new ArgumentOutOfRangeException(nameof(amount), "The fake payer does not hold that much.");
             var arrived = failed ? 0 : received ?? amount;
             var spent = failed ? 0 : amount;
             JObject Balance(int index, string owner, BigInteger units) => new()
@@ -172,37 +182,53 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                 ["uiTokenAmount"] = new JObject { ["amount"] = units.ToString(), ["decimals"] = 6 },
             };
             var meta = Meta(failed, before, after,
-                [Balance(1, fromWallet, 50_000_000), Balance(2, toWallet, 1_000_000)],
-                [Balance(1, fromWallet, 50_000_000 - spent), Balance(2, toWallet, 1_000_000 + arrived)]);
+                [Balance(1, fromWallet, StartingTokens), Balance(2, toWallet, 1_000_000)],
+                [Balance(1, fromWallet, StartingTokens - (long)spent), Balance(2, toWallet, 1_000_000 + arrived)]);
             meta["loadedAddresses"] = new JObject { ["writable"] = new JArray(), ["readonly"] = new JArray(loaded) };
-            return Add(out signature, keys, 1, meta, failed, loaded);
+            return Add(out signature, keys, 1, meta, failed, loaded, version);
         }
     }
 
-    ulong Add(out string signature, List<string> keys, int signers, JObject meta, bool failed, List<string>? loaded = null)
+    /// <summary>
+    /// A node labels a transaction "legacy" or with its version number: 0 when it loads addresses from a lookup table,
+    /// 1 for the format of September 2026, whose message also carries the limits the sender set.
+    /// </summary>
+    ulong Add(out string signature, List<string> keys, int signers, JObject meta, bool failed, List<string>? loaded = null, int? version = null)
     {
         slot++;
         counter++;
         var seed = Encoding.UTF8.GetBytes($"solana-tx:{slot}:{counter}");
         signature = Base58.Encode(SHA512.HashData(seed));
         var time = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        JToken label = "legacy";
+        if (version is { } number)
+            label = number;
+        else if (loaded is { Count: > 0 })
+            label = 0;
+        var message = new JObject
+        {
+            ["accountKeys"] = new JArray(keys),
+            ["header"] = new JObject { ["numRequiredSignatures"] = signers, ["numReadonlySignedAccounts"] = 0, ["numReadonlyUnsignedAccounts"] = 1 },
+            ["instructions"] = new JArray(),
+            ["recentBlockhash"] = Address("blockhash"),
+        };
+        if (version >= 1)
+        {
+            message["transactionConfig"] = new JObject
+            {
+                ["computeUnitLimit"] = 10_000,
+                ["heapSize"] = JValue.CreateNull(),
+                ["loadedAccountsDataSizeLimit"] = 67_108_864,
+                ["priorityFee"] = 0,
+            };
+        }
         var transaction = new JObject
         {
             ["slot"] = slot,
             ["blockTime"] = time,
-            ["version"] = loaded is { Count: > 0 } ? 0 : "legacy",
+            ["version"] = label,
             ["meta"] = meta,
-            ["transaction"] = new JObject
-            {
-                ["signatures"] = new JArray(signature),
-                ["message"] = new JObject
-                {
-                    ["accountKeys"] = new JArray(keys),
-                    ["header"] = new JObject { ["numRequiredSignatures"] = signers, ["numReadonlySignedAccounts"] = 0, ["numReadonlyUnsignedAccounts"] = 1 },
-                    ["instructions"] = new JArray(),
-                    ["recentBlockhash"] = Address("blockhash"),
-                },
-            },
+            ["transaction"] = new JObject { ["signatures"] = new JArray(signature), ["message"] = message },
         };
         var entry = new Entry(signature, slot, time, failed, transaction);
         transactions[signature] = entry;
@@ -279,7 +305,18 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                         }));
                     }
                 case "getTransaction":
-                    return !HidesTransactions && transactions.TryGetValue(args[0]!.Value<string>()!, out var found) ? found.Transaction : null;
+                    {
+                        if (HidesTransactions || !transactions.TryGetValue(args[0]!.Value<string>()!, out var found))
+                            return null;
+                        // A numbered version goes only to a client that says it reads that version; "legacy" needs no saying.
+                        var supported = args.Count > 1 ? args[1]!["maxSupportedTransactionVersion"]?.Value<int?>() : null;
+                        if (found.Transaction["version"] is JValue { Type: JTokenType.Integer } numbered && !(numbered.Value<int>() <= supported))
+                        {
+                            throw new RpcError(-32015, $"Transaction version ({numbered.Value<int>()}) is not supported by the requesting client. "
+                                                       + $"Please try the request again with the following configuration parameter: \"maxSupportedTransactionVersion\": {numbered.Value<int>()}");
+                        }
+                        return found.Transaction;
+                    }
                 default:
                     throw new RpcError(-32601, $"Method not found: {method}");
             }

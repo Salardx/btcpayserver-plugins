@@ -404,9 +404,10 @@ public class HostTests
             solCheckout.EnsureSuccessStatusCode();
             Assert.Contains("SOL", await solCheckout.Content.ReadAsStringAsync());
 
-            // A transfer typed by hand names no invoice and settles none; the wallet's transfer with the second reference settles the second.
+            // A transfer typed by hand names no invoice and settles none; the wallet's transfer with the second reference settles the
+            // second. It comes in the transaction format wallets also send since September 2026, version 1.
             solana.AddSolTransfer(out _, SolanaPayer, SolanaShop, 1_500_000_000);
-            solana.AddSolTransfer(out var solTx, SolanaPayer, SolanaShop, 1_500_000_000, [solSecondReference]);
+            solana.AddSolTransfer(out var solTx, SolanaPayer, SolanaShop, 1_500_000_000, [solSecondReference], version: 1);
             solana.AddSlots(10);
             await Eventually(async () => (await api.GetInvoice(solSecond.Id)).Status == InvoiceStatus.Settled, "the second Solana invoice did not settle");
             var solPayment = Assert.Single((await api.GetInvoicePaymentMethods(solSecond.Id)).Single().Payments);
@@ -449,6 +450,18 @@ public class HostTests
             await Eventually(async () => (await states.Get("Chains.NEO.Listener"))?.LastBlockIndex >= neo.Tip, "the Neo N3 listener did not reach the tip");
             await Eventually(async () => (await states.Get("Chains.NEOX.Listener"))?.LastBlockIndex >= neox.Tip, "the Neo X listener did not reach the tip");
             Assert.Equal(InvoiceStatus.New, (await api.GetInvoice(second.Id)).Status);
+
+            // Rows of invoices that can no longer be paid are swept by the end of the payment window stored with each claim.
+            // No row of this run is old enough to be swept, so read the stored value here the way the sweep does: every
+            // claim must carry a time PostgreSQL understands, or the query fails.
+            await using (var probe = new NpgsqlConnection(builder.ConnectionString))
+            {
+                await probe.OpenAsync();
+                await using var windows = new NpgsqlCommand(
+                    """SELECT count(*) FROM "Settings" WHERE starts_with("Id", 'Chains.') AND ("Value"->>'MonitoringExpiration')::timestamptz > now()""", probe);
+                var open = (long)(await windows.ExecuteScalarAsync())!;
+                Assert.True(open >= 20, $"only {open} claims carry the end of their payment window");
+            }
 
             await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(60));
         }

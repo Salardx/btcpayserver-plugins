@@ -219,6 +219,12 @@ public class SolanaTests
         Assert.Equal((FakeSolanaNode.Usdc, new BigInteger(12_500_000), Payer), (incoming.TokenHash, incoming.Amount, incoming.From));
         Assert.DoesNotContain(Shop, payment.Accounts);
 
+        // Amounts as the host test pays them: 1.5 SOL and 10 USDC.
+        node.AddSolTransfer(out var large, Payer, Shop, 1_500_000_000, [reference]);
+        Assert.Equal(new BigInteger(1_500_000_000), Assert.Single(SolanaTransfers.Parse(Json(node.Transaction(large)), Shop, tokens).Incoming).Amount);
+        node.AddTokenTransfer(out var ten, FakeSolanaNode.Usdc, Payer, Shop, 10_000_000, [reference]);
+        Assert.Equal(new BigInteger(10_000_000), Assert.Single(SolanaTransfers.Parse(Json(node.Transaction(ten)), Shop, tokens).Incoming).Amount);
+
         // A token that keeps a fee: what counts is what arrived.
         node.AddTokenTransfer(out var withFee, FakeSolanaNode.Usdc, Payer, Shop, 10_000_000, received: 9_990_000);
         Assert.Equal(new BigInteger(9_990_000), Assert.Single(SolanaTransfers.Parse(Json(node.Transaction(withFee)), Shop, tokens).Incoming).Amount);
@@ -278,6 +284,38 @@ public class SolanaTests
         Assert.Equal(range.Transfers, again.Transfers);
         Assert.Equal(2, node.Requests - before);   // the wallet's history and its USDC account's
         Assert.Empty((await client.ScanRangeAsync(from - 10, from - 1, watched, Devnet.TokenHashes(), CancellationToken.None)).Transfers);
+    }
+
+    [Fact]
+    public async Task Version_1_transactions_are_read_and_a_newer_version_is_left_out()
+    {
+        await using var node = new FakeSolanaNode();
+        var client = Client(node);
+        node.AddWallet(Shop);
+        node.AddTokenAccount(Shop, FakeSolanaNode.Usdc);
+        var (first, second, third) = (SolanaAddress.NewReference(), SolanaAddress.NewReference(), SolanaAddress.NewReference());
+        var watched = new HashSet<string> { SolanaAddress.SharedKey(Shop, first), SolanaAddress.SharedKey(Shop, second), SolanaAddress.SharedKey(Shop, third) };
+        var from = (uint)node.Slot + 1;
+
+        // Since September 2026 wallets also send the newer transaction format, version 1. A node returns such a
+        // transaction only to a client that says it reads version 1: one that says less is refused.
+        node.AddSolTransfer(out var sol, Payer, Shop, 250_000_000, [first], version: 1);
+        node.AddTokenTransfer(out var usdc, FakeSolanaNode.Usdc, Payer, Shop, 12_500_000, [second], version: 1);
+        Assert.Equal(1, node.Transaction(sol)["version"]!.Value<int>());
+        Assert.NotNull(node.Transaction(sol)["transaction"]!["message"]!["transactionConfig"]);
+        // A format newer than the plugin knows is refused by the node and left out; what follows it is read as usual.
+        node.AddSolTransfer(out _, Payer, Shop, 100_000_000, [third], version: 2);
+        node.AddSolTransfer(out var later, Payer, Shop, 300_000_000, [third]);
+
+        var range = await client.ScanRangeAsync(from, (uint)node.Slot, watched, Devnet.TokenHashes(), CancellationToken.None);
+
+        Assert.Equal(
+            [
+                (sol, SolanaAddress.SharedKey(Shop, first), new BigInteger(250_000_000)),
+                (usdc, SolanaAddress.SharedKey(Shop, second), new BigInteger(12_500_000)),
+                (later, SolanaAddress.SharedKey(Shop, third), new BigInteger(300_000_000)),
+            ],
+            range.Transfers.Select(t => (t.TxId, t.To, t.Amount)));
     }
 
     [Fact]

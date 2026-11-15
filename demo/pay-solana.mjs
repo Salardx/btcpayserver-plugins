@@ -66,7 +66,9 @@ async function send(instructions) {
   await rpc.sendTransaction(getBase64EncodedWireTransaction(transaction), { encoding: "base64", preflightCommitment: "confirmed" }).send();
   for (let attempt = 0; attempt < 90; attempt++) {
     await sleep(1000);
-    const { value } = await rpc.getSignatureStatuses([signature]).send();
+    // Asked with the history, so a node that no longer has the signature in its short-lived cache still answers; a
+    // throttled or failed question is simply asked again.
+    const { value } = await rpc.getSignatureStatuses([signature], { searchTransactionHistory: true }).send().catch(() => ({ value: [null] }));
     const status = value[0];
     if (status?.err) throw new Error(`transaction ${signature} failed: ${JSON.stringify(status.err, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`);
     if (status?.confirmationStatus === "finalized") return { signature, slot: Number(status.slot) };
@@ -110,12 +112,19 @@ if (genesis !== DEVNET_GENESIS) {
   } else {
     const fields = { recipient: request.recipient, amount: request.amount, splToken: request.splToken, reference: request.reference, memo: request.memo };
     const { signature, slot } = await send(await createTransfer(rpc, payer, fields));
-    // The reference implementation's own check of the finished payment, independent of the plugin's.
+    // The reference implementation's own check of the finished payment, independent of the plugin's. The node that
+    // answers can be a moment behind the one that reported the transaction final, so "not found" is asked again.
     let validated = true;
-    try {
-      await validateTransfer(rpc, signature, fields, { commitment: "finalized" });
-    } catch (error) {
-      validated = String(error);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await validateTransfer(rpc, signature, fields, { commitment: "finalized" });
+        validated = true;
+        break;
+      } catch (error) {
+        validated = String(error);
+        if (!/not found/i.test(validated) || attempt === 15) break;
+        await sleep(1000);
+      }
     }
     console.log(JSON.stringify({
       hash: signature,

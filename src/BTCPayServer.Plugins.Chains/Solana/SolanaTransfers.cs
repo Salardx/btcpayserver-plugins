@@ -19,7 +19,7 @@ public sealed record SolanaPayment(IReadOnlyList<string> Accounts, IReadOnlyList
 /// Pure reading of a <c>getTransaction</c> answer. A payment is measured the way the Solana Pay reference
 /// implementation validates one: by the balances before and after, which the node reports for every account of the
 /// transaction. That counts what actually arrived, whatever instructions moved it: a plain transfer, a transfer made
-/// inside another program, or a token with a transfer fee.
+/// inside another program, or a token with a transfer fee. The legacy format and versions 0 and 1 are read alike.
 /// </summary>
 public static class SolanaTransfers
 {
