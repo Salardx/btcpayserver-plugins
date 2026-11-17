@@ -8,6 +8,7 @@ using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Logging;
 using NeoPaymentWatcher.Chains;
 using NicolasDorier.RateLimits;
@@ -112,6 +113,7 @@ public class UISolanaPayController(
     /// </summary>
     [HttpPost("{invoiceId}/{paymentMethodId}/transaction")]
     [IgnoreAntiforgeryToken]
+    [BodyAtMost(MaxBodyBytes)]
     [RequestSizeLimit(MaxBodyBytes)]
     public async Task<IActionResult> Transaction(string invoiceId, PaymentMethodId paymentMethodId, [FromBody] SolanaPayRequest? request, CancellationToken cancellationToken)
     {
@@ -266,5 +268,25 @@ internal sealed class PayPageCeiling(TimeSpan window, int perWindow)
             entered++;
             return true;
         }
+    }
+}
+
+/// <summary>
+/// Answers a body larger than the limit with 413 before anything reads it. <see cref="RequestSizeLimitAttribute"/>
+/// alone raises an exception while the body is bound, which the host turns into a 500; this runs before the binding,
+/// so the caller is told plainly what was wrong. Both are kept: this one for a declared length, the other for a body
+/// that arrives in chunks without one.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+internal sealed class BodyAtMostAttribute(long bytes) : Attribute, IResourceFilter
+{
+    public void OnResourceExecuting(ResourceExecutingContext context)
+    {
+        if (context.HttpContext.Request.ContentLength > bytes)
+            context.Result = new ObjectResult(new { message = "That request is too large." }) { StatusCode = StatusCodes.Status413PayloadTooLarge };
+    }
+
+    public void OnResourceExecuted(ResourceExecutedContext context)
+    {
     }
 }
