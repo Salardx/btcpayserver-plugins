@@ -23,6 +23,14 @@ public static class SolanaAddress
     /// <summary>Between the address and the reference in the key of an invoice that shares its address. Not a Base58 character.</summary>
     public const char ReferenceSeparator = '#';
 
+    /// <summary>
+    /// How long 32 bytes are in Base58: 32 characters when every byte is zero, 44 when the number is at its largest.
+    /// Length is checked before decoding, because decoding costs time squared in the length and the pay page passes
+    /// in whatever a wallet in a stranger's browser sent.
+    /// </summary>
+    const int ShortestAddress = 32;
+    const int LongestAddress = 44;
+
     /// <summary>The field of Curve25519, and the constant d of the Edwards curve: -121665/121666.</summary>
     static readonly BigInteger P = BigInteger.Pow(2, 255) - 19;
     static readonly BigInteger D = BigInteger.Parse("37095705934669439343138083508754565189542113879843219016388785533085940283555", System.Globalization.CultureInfo.InvariantCulture);
@@ -34,6 +42,8 @@ public static class SolanaAddress
     {
         address = "";
         var text = input?.Trim();
+        if (text is not { Length: >= ShortestAddress and <= LongestAddress })
+            return false;
         if (!Base58.TryDecode(text, out var key) || key.Length != 32 || Base58.Encode(key) != text)
             return false;
         address = text;

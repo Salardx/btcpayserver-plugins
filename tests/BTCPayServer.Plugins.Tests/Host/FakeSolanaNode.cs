@@ -8,11 +8,15 @@ using Newtonsoft.Json.Linq;
 namespace BTCPayServer.Plugins.Tests.Host;
 
 /// <summary>
-/// A Solana node reduced to what the plugin asks for: getGenesisHash, getSlot, getSignaturesForAddress (newest first,
-/// with <c>before</c> and <c>minContextSlot</c>), getTransaction with the balances before and after, getAccountInfo
-/// and getMinimumBalanceForRentExemption. Transactions are indexed by every account they name, as on a real node, so
-/// a Solana Pay reference finds its payment and a token transfer is found at the token account, not at the wallet.
-/// A transaction of a numbered version is returned only to a client that names that version or a newer one.
+/// A Solana node reduced to what the plugin asks for: getGenesisHash, getSlot, getBlockHeight,
+/// getSignaturesForAddress (newest first, with <c>before</c> and <c>minContextSlot</c>), getTransaction with the
+/// balances before and after, getSignatureStatuses, getAccountInfo, getMultipleAccounts, getLatestBlockhash and
+/// getMinimumBalanceForRentExemption. Transactions are indexed by every account they name, as on a real node, so a
+/// Solana Pay reference finds its payment and a token transfer is found at the token account, not at the wallet. A
+/// transaction of a numbered version is returned only to a client that names that version or a newer one.
+///
+/// Commitment is honoured: with <see cref="FinalizedLag"/> set, the newest slots are confirmed but not yet
+/// finalized, so what a caller sees depends on which commitment it asks for, as it does on a real node.
 /// </summary>
 internal sealed class FakeSolanaNode : FakeJsonRpcNode
 {
@@ -30,6 +34,7 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
     readonly Dictionary<string, List<Entry>> histories = new(StringComparer.Ordinal);
     readonly Dictionary<string, Entry> transactions = new(StringComparer.Ordinal);
     readonly Dictionary<string, string> tokenPrograms = new(StringComparer.Ordinal);
+    readonly Dictionary<string, int> mintDecimals = new(StringComparer.Ordinal);
     ulong slot;
     int counter;
 
@@ -40,6 +45,25 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
 
     /// <summary>When set, getTransaction answers null, as a node does that has not caught up with the one that listed the signature.</summary>
     public bool HidesTransactions { get; set; }
+
+    /// <summary>When set, the block time of the transactions added from now on, instead of the present.</summary>
+    public DateTimeOffset? Clock { get; set; }
+
+    /// <summary>
+    /// How many of the newest slots are confirmed but not finalized. Zero by default, so a test that does not care
+    /// about commitment sees everything at once; set it to keep the newest slots out of the finalized view.
+    /// </summary>
+    public ulong FinalizedLag { get; set; }
+
+    /// <summary>The blockhash getLatestBlockhash gives at the current slot.</summary>
+    public string Blockhash
+    {
+        get
+        {
+            lock (Gate)
+                return Address($"blockhash:{slot}");
+        }
+    }
 
     public FakeSolanaNode(ulong initialSlot = 400_000_000)
     {
@@ -55,6 +79,13 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                 return slot;
         }
     }
+
+    /// <summary>The newest slot of a commitment: "finalized" lags behind by <see cref="FinalizedLag"/>, the others do not.</summary>
+    ulong SlotOf(string? commitment) =>
+        commitment == SolanaChainClient.Finalized && slot > FinalizedLag ? slot - FinalizedLag : commitment == SolanaChainClient.Finalized ? 0 : slot;
+
+    static string? Commitment(JArray args, int index) =>
+        args.Count > index && args[index] is JObject options ? options["commitment"]?.Value<string>() : null;
 
     public void AddSlots(int count)
     {
@@ -72,20 +103,24 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
     /// <summary>A fresh address, the same for the same name.</summary>
     public static string Address(string name) => Base58.Encode(SHA256.HashData(Encoding.UTF8.GetBytes("solana-address:" + name)));
 
+    /// <summary>A transaction signature this node never saw: 64 bytes, the length a signature has.</summary>
+    public static string Signature(string name) => Base58.Encode(SHA512.HashData(Encoding.UTF8.GetBytes("solana-unsent:" + name)));
+
     public void AddMint(string mint, string program, int decimals)
     {
         lock (Gate)
         {
             tokenPrograms[mint] = program;
+            mintDecimals[mint] = decimals;
             accounts[mint] = Account(program, new JObject { ["parsed"] = new JObject { ["info"] = new JObject { ["decimals"] = decimals }, ["type"] = "mint" } });
         }
     }
 
     /// <summary>A wallet that exists on chain: a system account holding some SOL.</summary>
-    public void AddWallet(string wallet)
+    public void AddWallet(string wallet, ulong lamports = DefaultLamports)
     {
         lock (Gate)
-            accounts[wallet] = Account(SolanaAddress.SystemProgram, new JArray("", "base64"));
+            accounts[wallet] = Account(SolanaAddress.SystemProgram, new JArray("", "base64"), lamports);
     }
 
     /// <summary>An account owned by some program, which is not a wallet.</summary>
@@ -95,8 +130,8 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
             accounts[address] = Account(program, new JArray("", "base64"));
     }
 
-    /// <summary>The wallet's token account for a token, at its derived address.</summary>
-    public string AddTokenAccount(string wallet, string mint, bool frozen = false)
+    /// <summary>The wallet's token account for a token, at its derived address, holding <paramref name="amount"/> of the token's smallest units.</summary>
+    public string AddTokenAccount(string wallet, string mint, bool frozen = false, ulong amount = 0)
     {
         lock (Gate)
         {
@@ -106,7 +141,13 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
             {
                 ["parsed"] = new JObject
                 {
-                    ["info"] = new JObject { ["mint"] = mint, ["owner"] = wallet, ["state"] = frozen ? "frozen" : "initialized" },
+                    ["info"] = new JObject
+                    {
+                        ["mint"] = mint,
+                        ["owner"] = wallet,
+                        ["state"] = frozen ? "frozen" : "initialized",
+                        ["tokenAmount"] = new JObject { ["amount"] = amount.ToString(), ["decimals"] = mintDecimals[mint] },
+                    },
                     ["type"] = "account",
                 },
             });
@@ -199,7 +240,7 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
         counter++;
         var seed = Encoding.UTF8.GetBytes($"solana-tx:{slot}:{counter}");
         signature = Base58.Encode(SHA512.HashData(seed));
-        var time = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var time = (Clock ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds();
         JToken label = "legacy";
         if (version is { } number)
             label = number;
@@ -252,11 +293,14 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
         ["loadedAddresses"] = new JObject { ["writable"] = new JArray(), ["readonly"] = new JArray() },
     };
 
-    static JObject Account(string owner, JToken data) => new()
+    /// <summary>What an account of the fake holds unless a test says otherwise: the least a token account may hold.</summary>
+    public const ulong DefaultLamports = 2_039_280;
+
+    static JObject Account(string owner, JToken data, ulong lamports = DefaultLamports) => new()
     {
         ["data"] = data,
         ["executable"] = false,
-        ["lamports"] = 2_039_280,
+        ["lamports"] = lamports,
         ["owner"] = owner,
         ["space"] = 0,
     };
@@ -271,9 +315,41 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                 case "getGenesisHash":
                     return Genesis;
                 case "getSlot":
-                    return slot;
+                case "getBlockHeight":
+                    return SlotOf(Commitment(args, 0));
                 case "getMinimumBalanceForRentExemption":
                     return RentExemptMinimum;
+                case "getLatestBlockhash":
+                    return new JObject
+                    {
+                        ["context"] = new JObject { ["slot"] = slot },
+                        ["value"] = new JObject { ["blockhash"] = Address($"blockhash:{slot}"), ["lastValidBlockHeight"] = SlotOf(Commitment(args, 0)) + 150 },
+                    };
+                case "getSignatureStatuses":
+                    {
+                        var wanted = (JArray)args[0]!;
+                        return new JObject
+                        {
+                            ["context"] = new JObject { ["slot"] = slot },
+                            ["value"] = new JArray(wanted.Select(signature =>
+                                transactions.TryGetValue(signature.Value<string>()!, out var known)
+                                    ? new JObject
+                                    {
+                                        ["slot"] = known.Slot,
+                                        ["confirmations"] = known.Slot > SlotOf(SolanaChainClient.Finalized) ? slot - known.Slot : JValue.CreateNull(),
+                                        ["err"] = known.Failed ? new JObject { ["InstructionError"] = new JArray(0, "Custom") } : JValue.CreateNull(),
+                                        ["confirmationStatus"] = known.Slot <= SlotOf(SolanaChainClient.Finalized) ? "finalized" : "confirmed",
+                                    }
+                                    : (JToken)JValue.CreateNull())),
+                        };
+                    }
+                case "getMultipleAccounts":
+                    return new JObject
+                    {
+                        ["context"] = new JObject { ["slot"] = slot },
+                        ["value"] = new JArray(((JArray)args[0]!).Select(address =>
+                            accounts.TryGetValue(address.Value<string>()!, out var account) ? account : (JToken)JValue.CreateNull())),
+                    };
                 case "getAccountInfo":
                     {
                         var address = args[0]!.Value<string>()!;
@@ -287,11 +363,14 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                     {
                         var address = args[0]!.Value<string>()!;
                         var options = args.Count > 1 ? (JObject)args[1]! : new JObject();
-                        if (options["minContextSlot"]?.Value<ulong>() > slot)
+                        var visible = SlotOf(options["commitment"]?.Value<string>());
+                        if (options["minContextSlot"]?.Value<ulong>() > visible)
                             throw new RpcError(-32016, "Minimum context slot has not been reached");
                         var limit = options["limit"]?.Value<int>() ?? 1000;
                         var before = options["before"]?.Value<string>();
-                        var newestFirst = histories.TryGetValue(address, out var history) ? history.AsEnumerable().Reverse().Skip(HiddenSignatures).ToList() : [];
+                        var newestFirst = histories.TryGetValue(address, out var history)
+                            ? history.AsEnumerable().Reverse().Where(e => e.Slot <= visible).Skip(HiddenSignatures).ToList()
+                            : [];
                         if (before is not null)
                             newestFirst = newestFirst.SkipWhile(e => e.Signature != before).Skip(1).ToList();
                         return new JArray(newestFirst.Take(limit).Select(e => new JObject
@@ -301,12 +380,13 @@ internal sealed class FakeSolanaNode : FakeJsonRpcNode
                             ["blockTime"] = e.BlockTime,
                             ["err"] = e.Failed ? new JObject { ["InstructionError"] = new JArray(0, "Custom") } : JValue.CreateNull(),
                             ["memo"] = JValue.CreateNull(),
-                            ["confirmationStatus"] = "finalized",
+                            ["confirmationStatus"] = e.Slot <= SlotOf(SolanaChainClient.Finalized) ? "finalized" : "confirmed",
                         }));
                     }
                 case "getTransaction":
                     {
-                        if (HidesTransactions || !transactions.TryGetValue(args[0]!.Value<string>()!, out var found))
+                        if (HidesTransactions || !transactions.TryGetValue(args[0]!.Value<string>()!, out var found)
+                            || found.Slot > SlotOf(Commitment(args, 1)))
                             return null;
                         // A numbered version goes only to a client that says it reads that version; "legacy" needs no saying.
                         var supported = args.Count > 1 ? args[1]!["maxSupportedTransactionVersion"]?.Value<int?>() : null;

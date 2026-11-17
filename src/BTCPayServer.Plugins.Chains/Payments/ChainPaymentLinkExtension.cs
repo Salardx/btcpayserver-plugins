@@ -14,7 +14,8 @@ namespace BTCPayServer.Plugins.Chains.Payments;
 /// <summary>
 /// The link behind the QR code: NEP-9 on Neo N3, EIP-681 on EVM chains (with the token's transfer call for tokens),
 /// a Solana Pay transfer request on Solana (with the invoice's reference), the plugin's pay page on NEAR (which has
-/// no wallet link standard), or the bare address.
+/// no wallet link standard), or the bare address. On Solana the plugin's pay page is a second link, for the
+/// checkout's button alone (<see cref="GetPayPageLink"/>).
 /// </summary>
 public class ChainPaymentLinkExtension(PaymentMethodId paymentMethodId, ChainDefinition chain, PaymentMethodDefinition method, PayPageRoute? payPage = null) : IPaymentLinkExtension
 {
@@ -29,22 +30,33 @@ public class ChainPaymentLinkExtension(PaymentMethodId paymentMethodId, ChainDef
     public string? GetPaymentLink(PaymentPrompt prompt, IUrlHelper? urlHelper)
     {
         var format = ReadFormat(prompt.Details);
-        if (format == PaymentLinkFormat.Standard && PayPage is not null && urlHelper is not null && prompt.ParentEntity?.Id is { Length: > 0 } invoiceId)
-        {
-            var request = urlHelper.ActionContext.HttpContext.Request;
-            var link = urlHelper.Action(PayPage.Action, PayPage.Controller, new { invoiceId, paymentMethodId = PaymentMethodId.ToString() }, request.Scheme, request.Host.ToUriComponent());
-            if (!string.IsNullOrEmpty(link))
-                return link;
-        }
+        if (PayPage is { ButtonOnly: false } && GetPayPageLink(prompt, urlHelper) is { } page)
+            return page;
         return Build(Chain, Method, prompt.Destination, prompt.Calculate().Due, format, ReadReference(prompt.Details));
     }
 
+    /// <summary>
+    /// The address of the plugin's pay page for this invoice, or null when there is none: the plugin serves no page,
+    /// the store hands out bare addresses, or, on a chain that matches by reference, the invoice carries no reference
+    /// for the page to put into the transfer.
+    /// </summary>
+    public string? GetPayPageLink(PaymentPrompt prompt, IUrlHelper? urlHelper)
+    {
+        if (PayPage is null || urlHelper is null || prompt.ParentEntity?.Id is not { Length: > 0 } invoiceId
+            || ReadFormat(prompt.Details) != PaymentLinkFormat.Standard
+            || (Chain.MatchesByReference && ReadReference(prompt.Details) is null))
+            return null;
+        var request = urlHelper.ActionContext.HttpContext.Request;
+        var link = urlHelper.Action(PayPage.Action, PayPage.Controller, new { invoiceId, paymentMethodId = PaymentMethodId.ToString() }, request.Scheme, request.Host.ToUriComponent());
+        return string.IsNullOrEmpty(link) ? null : link;
+    }
+
     /// <summary>The reference stored with the prompt, on chains that have one.</summary>
-    internal static string? ReadReference(JToken? details) =>
+    public static string? ReadReference(JToken? details) =>
         details is JObject && details["reference"] is JValue { Type: JTokenType.String } reference ? reference.Value<string>() : null;
 
     /// <summary>The format stored with the prompt, as a number or a name; anything unreadable means the default.</summary>
-    internal static PaymentLinkFormat ReadFormat(JToken? details)
+    public static PaymentLinkFormat ReadFormat(JToken? details)
     {
         try
         {
@@ -99,13 +111,21 @@ public class ChainCheckoutModelExtension(
         if (context.Handler?.PaymentMethodId != PaymentMethodId)
             return;
         var link = paymentLink.GetPaymentLink(context.Prompt, context.UrlHelper);
+        // The QR code holds the payment link. The button opens the plugin's pay page where there is one: on NEAR that
+        // is the payment link itself, on Solana a page next to the Solana Pay link, for a wallet in the browser, which
+        // cannot scan a code (the page also offers the link, for the wallet app of the phone it is shown on). A
+        // top-up invoice, which asks for no particular amount, has no transfer to prepare, so it keeps the link.
+        var payPage = context.Prompt.Calculate().Due > 0
+            ? (paymentLink as ChainPaymentLinkExtension)?.GetPayPageLink(context.Prompt, context.UrlHelper)
+            : null;
+        var button = payPage ?? link;
         context.Model.CheckoutBodyComponentName = BitcoinCheckoutModelExtension.CheckoutBodyComponentName;
-        context.Model.InvoiceBitcoinUrl = link;
+        context.Model.InvoiceBitcoinUrl = button;
         context.Model.InvoiceBitcoinUrlQR = link;
         // A wallet link is opened by scanning the QR code; a pay page is a web address, so the button that opens it stays.
-        // A Solana Pay link also opens the wallet app on the phone the checkout is shown on.
-        context.Model.ShowPayInWalletButton = link is not null
-            && (link.StartsWith("http", StringComparison.OrdinalIgnoreCase) || link.StartsWith("solana:", StringComparison.Ordinal));
+        // A Solana Pay link without a pay page also opens the wallet app on the phone the checkout is shown on.
+        context.Model.ShowPayInWalletButton = button is not null
+            && (button.StartsWith("http", StringComparison.OrdinalIgnoreCase) || button.StartsWith("solana:", StringComparison.Ordinal));
         context.Model.PaymentMethodCurrency = currencyDisplayName;
     }
 }

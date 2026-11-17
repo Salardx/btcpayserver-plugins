@@ -51,6 +51,9 @@ public static class SolanaChains
         NavKey = SolanaPlugin.PluginNavKey,
         ViewPrefix = "Solana",
         Chains = [ChainDefaults.ApplyConfiguration(Cluster(network == ChainName.Mainnet), configuration)],
+        // The QR code keeps the Solana Pay link, which wallet apps scan; the checkout's button opens the pay page,
+        // for a wallet in the browser, which cannot scan.
+        PayPage = new PayPageRoute("UISolanaPay", "Pay", ButtonOnly: true),
     };
 
     /// <summary>

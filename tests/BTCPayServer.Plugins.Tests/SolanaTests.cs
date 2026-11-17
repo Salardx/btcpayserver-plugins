@@ -46,7 +46,7 @@ public class SolanaTests
 
         Assert.Equal("Solana", definition.Id);
         Assert.Equal(SolanaPlugin.PluginNavKey, definition.NavKey);
-        Assert.Null(definition.PayPage);
+        Assert.Equal(new PayPageRoute("UISolanaPay", "Pay", ButtonOnly: true), definition.PayPage);
         var chain = Assert.Single(definition.Chains);
         Assert.Equal("SOLANA", chain.Id);
         Assert.True(chain.IsSolana);

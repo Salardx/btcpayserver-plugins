@@ -12,7 +12,9 @@ namespace BTCPayServer.Plugins.Solana;
 /// SOL, USDC and USDT on Solana as BTCPay Server payment methods. The plugin only watches the chain. The checkout
 /// shows a Solana Pay transfer request: the customer's wallet scans it and pays the store's own wallet, adding the
 /// invoice's reference to the transfer, and the listener finds the payment by that reference once it is final. So
-/// one address serves any number of open invoices. No keys, no node, no custody.
+/// one address serves any number of open invoices. A wallet in the browser, which cannot scan, pays the same
+/// transfer on the plugin's pay page: the server builds it unsigned, the wallet signs and sends it. No keys, no
+/// node, no custody.
 /// </summary>
 public class SolanaPlugin : BaseBTCPayServerPlugin
 {

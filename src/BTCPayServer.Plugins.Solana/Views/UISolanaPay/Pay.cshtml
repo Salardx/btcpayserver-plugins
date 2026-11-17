@@ -1,0 +1,72 @@
+@using System.Globalization
+@model BTCPayServer.Plugins.Solana.Controllers.SolanaPayViewModel
+@{
+    Layout = "_LayoutSimple";
+    var amount = Model.Due.ToString("0.#########", CultureInfo.InvariantCulture);
+    ViewData["Title"] = $"Pay {amount} {Model.Currency}";
+    ViewData["ShowFooter"] = false;
+}
+<div class="mx-auto my-5" style="max-width: 36rem" id="solana-pay"
+     data-invoice="@Model.InvoiceId"
+     data-method="@Model.PaymentMethodId"
+     data-amount="@amount"
+     data-currency="@Model.Currency"
+     data-network="@Model.Network"
+     data-chain="@Model.WalletChain"
+     data-explorer="@Model.ExplorerLink"
+     data-status-url="@Model.StatusUrl"
+     data-transaction-url="@Model.TransactionUrl"
+     data-sent-url="@Model.SentUrl"
+     data-checkout-url="@Model.CheckoutUrl">
+    <h2 class="mb-1">Pay @amount @Model.Currency</h2>
+    <p class="text-muted">@Model.MethodDisplayName · invoice <code>@Model.InvoiceId</code></p>
+    <div id="solana-pay-status" class="alert alert-secondary" role="status">Waiting for your payment.</div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">From a Solana wallet in this browser</h5>
+            <p class="card-text">
+                Choose your wallet and approve one transaction: exactly @amount @Model.Currency goes to the store's wallet, marked for this invoice.
+            </p>
+            <div id="solana-pay-wallets">
+                <p class="text-muted mb-0">Looking for wallets…</p>
+            </div>
+            <noscript><p class="text-muted mb-0">This needs JavaScript. Without it, use the wallet link below.</p></noscript>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">From a wallet app</h5>
+            <p class="card-text">On a phone with a Solana wallet app, this link opens the payment in it. From another device, go back to the checkout and scan its code with the app.</p>
+            <a class="btn btn-outline-primary" id="solana-pay-link" href="@Model.WalletLink">Open in a wallet app</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">The payment</h5>
+            <dl class="row mb-2">
+                <dt class="col-sm-3">Amount</dt>
+                <dd class="col-sm-9"><code>@amount</code> @Model.Currency, exactly</dd>
+                <dt class="col-sm-3">To wallet</dt>
+                <dd class="col-sm-9 text-break"><code id="solana-pay-destination">@Model.Destination</code></dd>
+                @if (Model.TokenMint is not null)
+                {
+                    <dt class="col-sm-3">Token</dt>
+                    <dd class="col-sm-9 text-break"><code>@Model.TokenMint</code></dd>
+                }
+                <dt class="col-sm-3">Network</dt>
+                <dd class="col-sm-9">Solana @Model.Network</dd>
+                <dt class="col-sm-3">Reference</dt>
+                <dd class="col-sm-9 text-break"><code id="solana-pay-reference">@Model.Reference</code></dd>
+            </dl>
+            <p class="form-text mb-0">The store's wallet receives the payments of many invoices; the reference is what marks a payment as this invoice's. Both ways above add it by themselves. A transfer typed by hand carries none: the money would arrive, but this invoice would stay unpaid. This page updates by itself when the payment is seen on chain.</p>
+        </div>
+    </div>
+    <p class="mt-3"><a href="@Model.CheckoutUrl">Back to the checkout</a></p>
+</div>
+
+@section PageFootContent {
+    <script src="~/Resources/solanapay/app.js" asp-append-version="true" defer></script>
+}

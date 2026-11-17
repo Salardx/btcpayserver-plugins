@@ -81,8 +81,13 @@ public sealed record ChainDefinition
         BlockExplorerLink.Replace("{0}", "{tx}"), FinalityBlocks, JsonRpcUris, NativeTransferLog);
 }
 
-/// <summary>The plugin's page where a customer pays from a wallet in the browser; the checkout links to it and puts it in the QR code.</summary>
-public sealed record PayPageRoute(string Controller, string Action);
+/// <summary>
+/// The plugin's page where a customer pays from a wallet in the browser. On a chain without a wallet link standard
+/// (NEAR) the page is the payment link itself: the checkout's button opens it and the QR code holds its address. On a
+/// chain that has one (Solana Pay), <see cref="ButtonOnly"/> keeps the wallet link as the invoice's payment link and
+/// in the QR code, which phone wallets scan, and only the checkout's button opens the page.
+/// </summary>
+public sealed record PayPageRoute(string Controller, string Action, bool ButtonOnly = false);
 
 /// <summary>What a plugin tells the shared services about itself.</summary>
 public sealed record ChainPluginDefinition
@@ -95,7 +100,7 @@ public sealed record ChainPluginDefinition
     /// <summary>Folder of the plugin's partial views under Views/Shared ("Neo" gives "Neo/StoreNav").</summary>
     public required string ViewPrefix { get; init; }
     public required IReadOnlyList<ChainDefinition> Chains { get; init; }
-    /// <summary>Set when the plugin serves a pay page; chains without a wallet link standard (NEAR) send the customer there.</summary>
+    /// <summary>Set when the plugin serves a pay page: NEAR, which has no wallet link standard, sends every customer there; Solana the ones who click the checkout's button.</summary>
     public PayPageRoute? PayPage { get; init; }
 }
 

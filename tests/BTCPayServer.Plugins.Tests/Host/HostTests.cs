@@ -31,7 +31,7 @@ namespace BTCPayServer.Plugins.Tests.Host;
 /// Runs BTCPay Server in-process with all seven plugins loaded, a fresh PostgreSQL database and fake nodes, and takes
 /// invoices from creation to settlement on Neo N3, Neo X, BNB Smart Chain (native BNB and a BEP-20 token), NEAR (NEAR
 /// and USDC), Arc (USDC, the chain's coin), Avalanche (USDC), Flare (FLR priced by the FTSO) and Solana (SOL and
-/// USDC, by Solana Pay reference and by reserved address).
+/// USDC, by Solana Pay reference and by reserved address; its pay page hands out the unsigned transfer a browser wallet signs).
 /// Needs <c>NEO_TEST_POSTGRES</c> (a connection string whose user may create databases); without it the test is skipped.
 /// </summary>
 public class HostTests
@@ -96,6 +96,9 @@ public class HostTests
         solana.AddWallet(SolanaShop);
         var solanaShopUsdc = solana.AddTokenAccount(SolanaShop, FakeSolanaNode.Usdc);
         solana.AddWallet(SolanaSpare);
+        // The customer's wallet, as the pay page looks at it before it builds a payment: 10 SOL and 100 USDC.
+        solana.AddWallet(SolanaPayer, 10_000_000_000);
+        var solanaPayerUsdc = solana.AddTokenAccount(SolanaPayer, FakeSolanaNode.Usdc, amount: 100_000_000);
         var database = "neo_host_" + Guid.NewGuid().ToString("N");
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
         await using (var admin = new NpgsqlConnection(builder.ConnectionString))
@@ -404,6 +407,60 @@ public class HostTests
             solCheckout.EnsureSuccessStatusCode();
             Assert.Contains("SOL", await solCheckout.Content.ReadAsStringAsync());
 
+            // The checkout keeps the Solana Pay link in its QR code, for a wallet app to scan, and its button opens the
+            // plugin's pay page, for a wallet in the browser, which cannot scan.
+            var solPagePath = $"/plugins/solana/pay/{solInvoice.Id}/SOL-SOLANA";
+            var solModel = JObject.Parse(await http.GetStringAsync($"/i/{solInvoice.Id}/status?paymentMethodId=SOL-SOLANA"));
+            Assert.Equal(solPrompt.PaymentLink, solModel["invoiceBitcoinUrlQR"]!.Value<string>());
+            Assert.EndsWith(solPagePath, solModel["invoiceBitcoinUrl"]!.Value<string>());
+            Assert.True(solModel["showPayInWalletButton"]!.Value<bool>());
+            var solPage = await http.GetAsync(solPagePath);
+            solPage.EnsureSuccessStatusCode();
+            var solPageHtml = await solPage.Content.ReadAsStringAsync();
+            Assert.Contains(SolanaShop, solPageHtml);
+            Assert.Contains(solReference, solPageHtml);
+            Assert.Contains("Pay 1.5 SOL", solPageHtml);
+            Assert.Contains("data-chain=\"solana:devnet\"", solPageHtml);
+            Assert.Contains($"data-transaction-url=\"{solPagePath}/transaction\"", solPageHtml);
+            // The page's script is served from the plugin's assembly, at the address the page names.
+            var scriptAddress = System.Text.RegularExpressions.Regex.Match(solPageHtml, "<script[^>]*\\ssrc=\"(/Resources/solanapay/app\\.js[^\"]*)\"").Groups[1].Value;
+            Assert.StartsWith("/Resources/solanapay/app.js", scriptAddress);
+            Assert.Contains("wallet-standard:app-ready", await http.GetStringAsync(System.Net.WebUtility.HtmlDecode(scriptAddress)));
+
+            // The page's script posts the account of the wallet that connected and gets the invoice's transfer for it:
+            // unsigned, from that account to the store's wallet, the amount due, the invoice's reference in it.
+            async Task<(System.Net.HttpStatusCode Status, JObject Body)> Prepare(string invoiceId, string method, string? account)
+            {
+                var answer = await http.PostAsync($"/plugins/solana/pay/{invoiceId}/{method}/transaction",
+                    new StringContent(new JObject { ["account"] = account }.ToString(), System.Text.Encoding.UTF8, "application/json"));
+                var text = await answer.Content.ReadAsStringAsync();
+                return (answer.StatusCode, text.TrimStart().StartsWith('{') ? JObject.Parse(text) : new JObject());
+            }
+            var refused = await Prepare(solInvoice.Id, "SOL-SOLANA", "not-an-account");
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest, refused.Status);
+            Assert.Contains("did not name a Solana account", refused.Body["message"]!.Value<string>());
+            // An account far too long for 32 bytes of Base58 is refused on its length, and a body far too long for
+            // an account never reaches the action at all. Decoding either would cost time squared in the length.
+            var longAccount = await Prepare(solInvoice.Id, "SOL-SOLANA", new string('z', 900));
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest, longAccount.Status);
+            var hugeBody = await http.PostAsync($"/plugins/solana/pay/{solInvoice.Id}/SOL-SOLANA/transaction",
+                new StringContent(new JObject { ["account"] = new string('z', 200_000) }.ToString(), System.Text.Encoding.UTF8, "application/json"));
+            Assert.Equal(System.Net.HttpStatusCode.RequestEntityTooLarge, hugeBody.StatusCode);
+            var prepared = await Prepare(solInvoice.Id, "SOL-SOLANA", SolanaPayer);
+            Assert.Equal(System.Net.HttpStatusCode.OK, prepared.Status);
+            var solWire = SolanaWire.Parse(Convert.FromBase64String(prepared.Body["transaction"]!.Value<string>()!));
+            Assert.Equal(new byte[64], Assert.Single(solWire.Signatures));
+            Assert.Equal(solana.Blockhash, solWire.Blockhash);
+            var solTransfer = Assert.Single(solWire.Instructions);
+            Assert.Equal(SolanaAddress.SystemProgram, solTransfer.Program);
+            Assert.Equal([SolanaPayer, SolanaShop, solReference], solTransfer.Accounts);
+            Assert.Equal(1_500_000_000ul, SolanaWire.SystemTransferLamports(solTransfer.Data));
+            // A wallet that cannot pay is told why, in words; nothing is built.
+            var empty = await Prepare(solSecond.Id, "SOL-SOLANA", FakeSolanaNode.Address("host-empty-wallet"));
+            Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, empty.Status);
+            Assert.Equal("This wallet holds no SOL on Solana devnet.", empty.Body["message"]!.Value<string>());
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, (await Prepare("no-such-invoice", "SOL-SOLANA", SolanaPayer)).Status);
+
             // A transfer typed by hand names no invoice and settles none; the wallet's transfer with the second reference settles the
             // second. It comes in the transaction format wallets also send since September 2026, version 1.
             solana.AddSolTransfer(out _, SolanaPayer, SolanaShop, 1_500_000_000);
@@ -415,6 +472,14 @@ public class HostTests
             Assert.StartsWith(solTx, solPayment.Id);
             Assert.Equal(InvoiceStatus.New, (await api.GetInvoice(solInvoice.Id)).Status);
             solanaInvoiceId = solSecond.Id;
+            // A paid invoice takes no further payment from the page.
+            var late = await Prepare(solSecond.Id, "SOL-SOLANA", SolanaPayer);
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, late.Status);
+            Assert.Equal("This invoice is paid already.", late.Body["message"]!.Value<string>());
+            // ... and its pay page leads back to the checkout, which shows it as paid.
+            var paidPage = await http.GetAsync($"/plugins/solana/pay/{solSecond.Id}/SOL-SOLANA");
+            paidPage.EnsureSuccessStatusCode();
+            Assert.StartsWith($"/i/{solSecond.Id}", paidPage.RequestMessage!.RequestUri!.AbsolutePath);
 
             // USDC on Solana arrives at the wallet's token account; the wallet itself is not named by the transaction.
             var solUsdcInvoice = await CreateInvoice(api, store.Id, "USDC-SOLANA", "USDC", 10m);
@@ -422,7 +487,29 @@ public class HostTests
             Assert.Equal(SolanaShop, solUsdcPrompt.Destination);
             var solUsdcReference = Reference(solUsdcPrompt.PaymentLink, $"solana:{SolanaShop}?amount=10");
             Assert.Contains($"&spl-token={FakeSolanaNode.Usdc}&reference=", solUsdcPrompt.PaymentLink);
+            // From the pay page a token is paid with a checked transfer between the two wallets' token accounts.
+            var preparedUsdc = await Prepare(solUsdcInvoice.Id, "USDC-SOLANA", SolanaPayer);
+            Assert.Equal(System.Net.HttpStatusCode.OK, preparedUsdc.Status);
+            var usdcTransfer = Assert.Single(SolanaWire.Parse(Convert.FromBase64String(preparedUsdc.Body["transaction"]!.Value<string>()!)).Instructions);
+            Assert.Equal(SolanaAddress.TokenProgram, usdcTransfer.Program);
+            Assert.Equal([solanaPayerUsdc, FakeSolanaNode.Usdc, solanaShopUsdc, SolanaPayer, solUsdcReference], usdcTransfer.Accounts);
+            Assert.Equal((10_000_000ul, (byte)6), SolanaWire.TransferChecked(usdcTransfer.Data));
+            // The node now keeps its newest slots out of the finalized view, which is the view the listener reads:
+            // the payment below is on the chain, and the listener cannot see it yet. The page must prepare no second
+            // one, and must be able to say what became of the first.
+            solana.FinalizedLag = 40;
             solana.AddTokenTransfer(out var solUsdcTx, FakeSolanaNode.Usdc, SolanaPayer, SolanaShop, 10_000_000, [solUsdcReference]);
+            var pending = await Prepare(solUsdcInvoice.Id, "USDC-SOLANA", SolanaPayer);
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, pending.Status);
+            Assert.Equal(solUsdcTx, pending.Body["signature"]!.Value<string>());
+            var sent = await http.GetStringAsync($"/plugins/solana/pay/{solUsdcInvoice.Id}/USDC-SOLANA/sent?signature={solUsdcTx}&lastValidBlockHeight={solana.Slot + 150}");
+            Assert.Equal("paid", JObject.Parse(sent)["state"]!.Value<string>());
+            // A signature nobody sent, whose blockhash the network would no longer take, is gone for good.
+            var gone = await http.GetStringAsync($"/plugins/solana/pay/{solUsdcInvoice.Id}/USDC-SOLANA/sent?signature={FakeSolanaNode.Signature("never sent")}&lastValidBlockHeight=1");
+            Assert.Equal("gone", JObject.Parse(gone)["state"]!.Value<string>());
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest,
+                (await http.GetAsync($"/plugins/solana/pay/{solUsdcInvoice.Id}/USDC-SOLANA/sent?signature=not-a-signature")).StatusCode);
+            solana.FinalizedLag = 0;
             solana.AddSlots(10);
             await Eventually(async () => (await api.GetInvoice(solUsdcInvoice.Id)).Status == InvoiceStatus.Settled, "the USDC on Solana invoice did not settle");
             var solUsdcPayment = Assert.Single((await api.GetInvoicePaymentMethods(solUsdcInvoice.Id)).Single().Payments);
@@ -436,6 +523,12 @@ public class HostTests
             var solPlainPrompt = Assert.Single(await api.GetInvoicePaymentMethods(solPlainInvoice.Id));
             Assert.Equal(SolanaSpare, solPlainPrompt.Destination);
             Assert.Equal(SolanaSpare, solPlainPrompt.PaymentLink);
+            // Without a reference there is nothing for the pay page to put into a transfer: no page, and no button to it.
+            var solPlainModel = JObject.Parse(await http.GetStringAsync($"/i/{solPlainInvoice.Id}/status?paymentMethodId=SOL-SOLANA"));
+            Assert.Equal(SolanaSpare, solPlainModel["invoiceBitcoinUrl"]!.Value<string>());
+            Assert.False(solPlainModel["showPayInWalletButton"]!.Value<bool>());
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, (await http.GetAsync($"/plugins/solana/pay/{solPlainInvoice.Id}/SOL-SOLANA")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, (await Prepare(solPlainInvoice.Id, "SOL-SOLANA", SolanaPayer)).Status);
             await Assert.ThrowsAsync<GreenfieldAPIException>(() => CreateInvoice(api, store.Id, "SOL-SOLANA", "SOL", 0.25m));   // the one address is reserved
             solana.AddSolTransfer(out var solPlainTx, SolanaPayer, SolanaSpare, 250_000_000);
             solana.AddSlots(10);

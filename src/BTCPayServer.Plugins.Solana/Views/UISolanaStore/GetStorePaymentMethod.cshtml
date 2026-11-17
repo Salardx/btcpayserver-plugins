@@ -22,7 +22,7 @@
         @if (Model.SharesAddresses)
         {
             <p class="mb-0">
-                Payments go straight to your own Solana wallet. The checkout shows a Solana Pay code; the customer's wallet scans it and adds the invoice's reference to the transfer, and the payment is matched by that reference. So one address is enough for any number of open invoices: the first address in the list receives them all.
+                Payments go straight to your own Solana wallet. The checkout shows a Solana Pay code; the customer's wallet app scans it and adds the invoice's reference to the transfer, and the payment is matched by that reference. A customer whose wallet is in the browser clicks the checkout's button instead and pays on the pay page, where the wallet signs the same transfer. So one address is enough for any number of open invoices: the first address in the list receives them all.
             </p>
         }
         else
@@ -98,7 +98,7 @@
             @if (Model.SharesAddresses)
             {
                 <div class="alert alert-warning" role="alert">
-                    A transfer typed by hand or sent from an exchange carries no reference. It still reaches your wallet, but no invoice is marked paid by it. If your customers pay that way, choose the address-only link below and list one address per invoice you expect to be open at the same time.
+                    The code and the pay page put the invoice's reference into the transfer. A transfer typed by hand or sent from an exchange carries none: it still reaches your wallet, but no invoice is marked paid by it. If your customers pay that way, choose the address-only link below and list one address per invoice you expect to be open at the same time.
                 </div>
             }
             else
@@ -138,7 +138,7 @@
             <div class="form-group mb-3">
                 <label asp-for="PaymentLinkFormat" class="form-label">Payment link format</label>
                 <select asp-for="PaymentLinkFormat" class="form-select">
-                    <option value="@((int)PaymentLinkFormat.Standard)">Solana Pay link (wallets scan it and prefill the payment; open invoices share one address)</option>
+                    <option value="@((int)PaymentLinkFormat.Standard)">Solana Pay link (wallet apps scan it, browser wallets pay on the pay page; open invoices share one address)</option>
                     <option value="@((int)PaymentLinkFormat.AddressOnly)">Address only (any wallet or exchange can pay; each open invoice reserves one address)</option>
                 </select>
                 <span asp-validation-for="PaymentLinkFormat" class="text-danger"></span>

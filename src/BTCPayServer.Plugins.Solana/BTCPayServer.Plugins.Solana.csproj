@@ -11,7 +11,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace>BTCPayServer.Plugins.Solana</RootNamespace>
     <Product>Solana Payment Watcher</Product>
-    <Description>Accept SOL, USDC and USDT on Solana straight to your own wallet, with Solana Pay. Watch-only: no node, no keys, no custody.</Description>
+    <Description>Accept SOL, USDC and USDT on Solana straight to your own wallet, with Solana Pay. Watch-only: no node, no keys, no custody. Customers pay by scanning the code, or from a browser wallet on the plugin's pay page.</Description>
     <Version>0.1.0</Version>
     <Authors>Salardx</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -23,6 +23,9 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\sol.svg" LogicalName="BTCPayServer.Plugins.Solana.sol.svg" />
+    <!-- The pay page script, hand-written and served as it is at /Resources/solanapay/app.js through BTCPay's
+         EmbeddedFileProvider over this assembly, so the default manifest name (RootNamespace + path) must stay. -->
+    <EmbeddedResource Include="Resources\solanapay\app.js" />
     <ProjectReference Include="..\BTCPayServer.Plugins.Chains\BTCPayServer.Plugins.Chains.csproj" />
     <!-- Referencing BTCPay Server must not copy any of its artifacts into the published plugin. -->
     <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
