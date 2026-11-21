@@ -1,6 +1,6 @@
-// Runs BTCPay Server in-process with all seven plugins loaded, on a fresh PostgreSQL database, with BTCPay's network set to
+// Runs BTCPay Server in-process with all eight plugins loaded, on a fresh PostgreSQL database, with BTCPay's network set to
 // regtest (the plugins read that as "testnet": NEAR testnet, Neo N3 testnet, Neo X testnet, BNB Smart Chain testnet, Solana
-// devnet, Arc testnet, Avalanche Fuji, Flare Coston2).
+// devnet, Arc testnet, Avalanche Fuji, Flare Coston2, IoTeX testnet).
 // An admin user is created and its credentials are printed and written to demo-host.json, for the recorder or for a
 // person who wants to click through the plugins. No Bitcoin node, no NBXplorer: the chains come from public nodes.
 //
@@ -17,6 +17,7 @@ using BTCPayServer.Plugins.Arc;
 using BTCPayServer.Plugins.Avalanche;
 using BTCPayServer.Plugins.BNBChain;
 using BTCPayServer.Plugins.Flare;
+using BTCPayServer.Plugins.IoTeX;
 using BTCPayServer.Plugins.NEAR;
 using BTCPayServer.Plugins.Neo;
 using BTCPayServer.Plugins.Solana;
@@ -61,10 +62,11 @@ var config = new Dictionary<string, string?>
     ["postgres"] = builder.ConnectionString,
     ["disable-registration"] = "false",
     ["DEBUG_PLUGINS"] = string.Join(";", typeof(NeoPlugin).Assembly.Location, typeof(BNBChainPlugin).Assembly.Location, typeof(NEARPlugin).Assembly.Location,
-        typeof(SolanaPlugin).Assembly.Location, typeof(ArcPlugin).Assembly.Location, typeof(AvalanchePlugin).Assembly.Location, typeof(FlarePlugin).Assembly.Location),
+        typeof(SolanaPlugin).Assembly.Location, typeof(ArcPlugin).Assembly.Location, typeof(AvalanchePlugin).Assembly.Location, typeof(FlarePlugin).Assembly.Location,
+        typeof(IoTeXPlugin).Assembly.Location),
 };
 // Node overrides ({CHAIN}_JSONRPC_URI) and token contracts ({CHAIN}_{CURRENCY}_CONTRACT) pass through from the environment.
-foreach (var chain in new[] { "NEAR", "NEO", "NEOX", "BSC", "SOLANA", "ARC", "AVAXC", "FLARE" })
+foreach (var chain in new[] { "NEAR", "NEO", "NEOX", "BSC", "SOLANA", "ARC", "AVAXC", "FLARE", "IOTEX" })
     foreach (var setting in new[] { "JSONRPC_URI", "USDT_CONTRACT", "USDC_CONTRACT", "EURC_CONTRACT", "USDT0_CONTRACT", "FXRP_CONTRACT" })
         if (Environment.GetEnvironmentVariable($"{chain}_{setting}") is { Length: > 0 } value)
             config[$"{chain}_{setting}"] = value;
@@ -86,7 +88,7 @@ Console.WriteLine($"BTCPAY_URL={url}");
 Console.WriteLine($"BTCPAY_EMAIL={email}");
 Console.WriteLine($"BTCPAY_PASSWORD={password}");
 await File.WriteAllTextAsync(Path.Combine(Directory.GetCurrentDirectory(), "demo-host.json"), JsonSerializer.Serialize(credentials));
-Console.WriteLine("BTCPay Server is up with the Neo, BNB Chain, NEAR, Solana, Arc, Avalanche and Flare plugins. Press Ctrl+C to stop.");
+Console.WriteLine("BTCPay Server is up with the Neo, BNB Chain, NEAR, Solana, Arc, Avalanche, Flare and IoTeX plugins. Press Ctrl+C to stop.");
 await host.WaitForShutdownAsync();
 return 0;
 

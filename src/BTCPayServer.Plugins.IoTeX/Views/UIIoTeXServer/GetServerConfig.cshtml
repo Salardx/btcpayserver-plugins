@@ -1,0 +1,37 @@
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@model BTCPayServer.Plugins.Chains.Controllers.ChainServerConfigViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel($"{Model.PluginId}-{Model.ChainId}", Model.DisplayName ?? Model.PluginId ?? "").SetCategory(WellKnownCategories.Server));
+}
+
+<form method="post" enctype="multipart/form-data">
+    <div class="sticky-header">
+        <h2>@Model.DisplayName server settings</h2>
+        <button id="SaveButton" type="submit" class="btn btn-primary" name="command" value="Save">Save</button>
+    </div>
+    <div class="row">
+        <div class="col-md-6">
+            <div asp-validation-summary="All"></div>
+        </div>
+    </div>
+    <partial name="_StatusMessage" />
+    <div class="row">
+        <div class="col-md-8">
+            <h4>Node connection</h4>
+            <div class="form-group">
+                <label asp-for="JsonRpcUri" class="form-label">JSON-RPC URL</label>
+                <input asp-for="JsonRpcUri" type="text" class="form-control" placeholder="@Model.DefaultJsonRpcUris" style="flex: 1 1 14rem">
+                <span asp-validation-for="JsonRpcUri" class="text-danger"></span>
+                <div class="form-text">
+                    The @Model.DisplayName node this server reads blocks from. Empty means the public nodes: <code>@Model.DefaultJsonRpcUris</code>. For a busy store, put your own node or a keyed endpoint here.
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+@section PageFootContent {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+}

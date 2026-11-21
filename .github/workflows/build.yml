@@ -18,6 +18,7 @@ on:
           - avalanche
           - flare
           - bnb
+          - iotex
         default: near
   schedule:
     # Mondays 05:23 UTC: the latest-btcpay job below, against BTCPay Server's newest release.
@@ -65,6 +66,7 @@ jobs:
           dotnet format src/BTCPayServer.Plugins.Arc --verify-no-changes --no-restore
           dotnet format src/BTCPayServer.Plugins.Avalanche --verify-no-changes --no-restore
           dotnet format src/BTCPayServer.Plugins.Flare --verify-no-changes --no-restore
+          dotnet format src/BTCPayServer.Plugins.IoTeX --verify-no-changes --no-restore
           dotnet format tests/BTCPayServer.Plugins.Tests --verify-no-changes --no-restore
           dotnet format demo/DemoHost --verify-no-changes --no-restore
       - uses: actions/setup-node@v4
@@ -98,6 +100,7 @@ jobs:
           - BTCPayServer.Plugins.Arc
           - BTCPayServer.Plugins.Avalanche
           - BTCPayServer.Plugins.Flare
+          - BTCPayServer.Plugins.IoTeX
     env:
       DOTNET_NOLOGO: 1
       DOTNET_CLI_TELEMETRY_OPTOUT: 1
@@ -160,8 +163,10 @@ jobs:
   # NEAR_DEMO_PAYER_KEY, NEAR_DEMO_SHOP, optionally NEAR_DEMO_USDC with the testnet USDC contract when the payer holds test USDC).
   # The input picks another plugin and testnet instead:
   #   solana                       Solana devnet, paid by the Solana Pay reference implementation: SOLANA_DEMO_PAYER_KEY, SOLANA_DEMO_SHOP
-  #   arc, avalanche, flare, bnb   Arc testnet, Avalanche Fuji, Flare Coston2, BNB Smart Chain testnet: EVM_DEMO_PAYER_KEY, EVM_DEMO_SHOP
-  # Each records an invoice in the chain's coin and, when the payer holds the test token, a second one in that token.
+  #   arc, avalanche, flare, bnb,  Arc testnet, Avalanche Fuji, Flare Coston2, BNB Smart Chain testnet, IoTeX testnet:
+  #   iotex                        EVM_DEMO_PAYER_KEY, EVM_DEMO_SHOP
+  # Each records an invoice in the chain's coin and, when the payer holds the test token, a second one in that token
+  # (IoTeX has no test token: its recording is the IOTX invoice alone).
   demo:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

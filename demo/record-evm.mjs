@@ -4,11 +4,12 @@
 // the invoice's payment list is shown. One page, one video (webm) plus screenshots, under out/.
 //
 //   BTCPAY_URL, BTCPAY_EMAIL, BTCPAY_PASSWORD   or DEMO_HOST_FILE pointing at DemoHost's demo-host.json (default: ./demo-host.json)
-//   EVM_PRESET                                  which plugin and testnet: bnb (default), arc, avalanche or flare
+//   EVM_PRESET                                  which plugin and testnet: bnb (default), arc, avalanche, flare or iotex
 //   EVM_SHOP                                    the address that receives
 //   EVM_PAYER_KEY                               the payer's testnet key, for pay-evm.mjs
 //
-// The second invoice of each preset is in a token; it is left out when the payer holds too little of it.
+// The second invoice of each preset is in a token; it is left out when the payer holds too little of it, and IoTeX's
+// testnet has no test token, so its preset records the coin invoice alone.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -45,6 +46,12 @@ const PRESETS = {
     explorer: "https://coston2-explorer.flare.network/tx/{tx}",
     coin: { method: "FLR-FLARE", currency: "FLR", amount: "0.10", invoiceCurrency: "USD" },
     token: { method: "FXRP-FLARE", currency: "FXRP", amount: "1", contract: "0x0b6A3645c240605887a5532109323A3E12273dc7", decimals: "6" },
+  },
+  iotex: {
+    plugin: "iotex", pluginName: "IoTeX", chainId: "4690", rpc: "https://babel-api.testnet.iotex.io",
+    explorer: "https://testnet.iotexscan.io/tx/{tx}",
+    coin: { method: "IOTX-IOTEX", currency: "IOTX", amount: "1" },
+    token: null,
   },
 };
 
@@ -121,10 +128,10 @@ function payer(args) {
   });
 }
 
-const balances = await payer(["--show", "balances", "--token", preset.token.contract, "--decimals", preset.token.decimals]);
-log(`payer ${balances.payer} holds ${balances.coin} ${preset.coin.currency} and ${balances.token} ${preset.token.currency}`);
-const withToken = Number(balances.token) >= Number(preset.token.amount);
-if (!withToken) log(`too little ${preset.token.currency} for the token invoice; recording the ${preset.coin.currency} invoice only`);
+const balances = await payer(["--show", "balances", ...(preset.token ? ["--token", preset.token.contract, "--decimals", preset.token.decimals] : [])]);
+log(`payer ${balances.payer} holds ${balances.coin} ${preset.coin.currency}${preset.token ? ` and ${balances.token} ${preset.token.currency}` : ""}`);
+const withToken = preset.token !== null && Number(balances.token) >= Number(preset.token.amount);
+if (preset.token && !withToken) log(`too little ${preset.token.currency} for the token invoice; recording the ${preset.coin.currency} invoice only`);
 
 log("creating the store");
 const store = await api("POST", "/api/v1/stores", { name: `${pluginName} demo store` });

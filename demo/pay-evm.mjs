@@ -5,7 +5,8 @@
 //   node pay-evm.mjs --show balances [--token 0x<contract> --decimals 6]   what the payer holds, without paying
 //
 // The payer comes from the environment: EVM_PAYER_KEY (0x and 64 hex digits, a testnet key). Never commit it.
-// Optional: EVM_CHAIN_ID (97, the BNB Smart Chain testnet; 5042002 Arc testnet, 43113 Avalanche Fuji, 114 Flare Coston2)
+// Optional: EVM_CHAIN_ID (97, the BNB Smart Chain testnet; 5042002 Arc testnet, 43113 Avalanche Fuji, 114 Flare Coston2,
+// 4690 IoTeX testnet)
 // and EVM_RPC (a JSON-RPC URL of that chain; the testnets named here have a default).
 // The node must report the same chain id, and the well-known mainnets are refused: this script is for demos.
 // Prints one JSON line, { hash, height, receiver, amount, token, status }, for the test or the recorder that called it.
@@ -15,10 +16,11 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 const DEFAULT_RPC = {
   97: "https://bsc-testnet-rpc.publicnode.com",
   114: "https://coston2-api.flare.network/ext/C/rpc",
+  4690: "https://babel-api.testnet.iotex.io",
   43113: "https://api.avax-test.network/ext/bc/C/rpc",
   5042002: "https://rpc.testnet.arc.io",
 };
-const MAINNETS = [1n, 10n, 14n, 19n, 56n, 137n, 204n, 5042n, 8453n, 42161n, 43114n, 47763n];
+const MAINNETS = [1n, 10n, 14n, 19n, 56n, 137n, 204n, 4689n, 5042n, 8453n, 42161n, 43114n, 47763n];
 
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2)

@@ -24,6 +24,7 @@
     <Project Path="src/BTCPayServer.Plugins.Arc/BTCPayServer.Plugins.Arc.csproj" />
     <Project Path="src/BTCPayServer.Plugins.Avalanche/BTCPayServer.Plugins.Avalanche.csproj" />
     <Project Path="src/BTCPayServer.Plugins.Flare/BTCPayServer.Plugins.Flare.csproj" />
+    <Project Path="src/BTCPayServer.Plugins.IoTeX/BTCPayServer.Plugins.IoTeX.csproj" />
     <Project Path="src/BTCPayServer.Plugins.Solana/BTCPayServer.Plugins.Solana.csproj" />
   </Folder>
   <Folder Name="/demo/">

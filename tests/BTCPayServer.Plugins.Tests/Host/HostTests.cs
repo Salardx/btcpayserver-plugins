@@ -10,6 +10,7 @@ using BTCPayServer.Plugins.BNBChain;
 using BTCPayServer.Plugins.Chains.Services;
 using BTCPayServer.Plugins.Chains.Solana;
 using BTCPayServer.Plugins.Flare;
+using BTCPayServer.Plugins.IoTeX;
 using BTCPayServer.Plugins.NEAR;
 using BTCPayServer.Plugins.Neo;
 using BTCPayServer.Plugins.Solana;
@@ -28,9 +29,9 @@ using Npgsql;
 namespace BTCPayServer.Plugins.Tests.Host;
 
 /// <summary>
-/// Runs BTCPay Server in-process with all seven plugins loaded, a fresh PostgreSQL database and fake nodes, and takes
+/// Runs BTCPay Server in-process with all eight plugins loaded, a fresh PostgreSQL database and fake nodes, and takes
 /// invoices from creation to settlement on Neo N3, Neo X, BNB Smart Chain (native BNB and a BEP-20 token), NEAR (NEAR
-/// and USDC), Arc (USDC, the chain's coin), Avalanche (USDC), Flare (FLR priced by the FTSO) and Solana (SOL and
+/// and USDC), Arc (USDC, the chain's coin), Avalanche (USDC), Flare (FLR priced by the FTSO), IoTeX (IOTX) and Solana (SOL and
 /// USDC, by Solana Pay reference and by reserved address; its pay page hands out the unsigned transfer a browser wallet signs).
 /// Needs <c>NEO_TEST_POSTGRES</c> (a connection string whose user may create databases); without it the test is skipped.
 /// </summary>
@@ -48,6 +49,7 @@ public class HostTests
     static readonly string[] ArcPool = ["0x4444444444444444444444444444444444444444", "0x5555555555555555555555555555555555555555"];
     static readonly string[] AvalanchePool = ["0x6666666666666666666666666666666666666666", "0x7777777777777777777777777777777777777777"];
     static readonly string[] FlarePool = ["0x8888888888888888888888888888888888888888", "0x9999999999999999999999999999999999999999"];
+    static readonly string[] IoTeXPool = ["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"];
     /// <summary>A smart account's entry point: a contract that moves the payer's USDC on Arc, so the transaction carries no value of its own.</summary>
     const string EntryPoint = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789";
     const string Ftso = "0x7bde3df0624114edb3a67dfe6753e62f4e7c1d20";
@@ -92,6 +94,7 @@ public class HostTests
                 ? null
                 : "0x" + feeds[feed].ToString("x64")[^64..] + 8.ToString("x64") + DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString("x64");
         };
+        await using var iotex = new FakeEvmNode(chainId: 4690);
         await using var solana = new FakeSolanaNode();
         solana.AddWallet(SolanaShop);
         var solanaShopUsdc = solana.AddTokenAccount(SolanaShop, FakeSolanaNode.Usdc);
@@ -124,7 +127,8 @@ public class HostTests
             ["TEST_RUNNER_ENABLED"] = "true",
             ["disable-registration"] = "false",
             ["DEBUG_PLUGINS"] = string.Join(";", typeof(NeoPlugin).Assembly.Location, typeof(BNBChainPlugin).Assembly.Location, typeof(NEARPlugin).Assembly.Location,
-                typeof(ArcPlugin).Assembly.Location, typeof(AvalanchePlugin).Assembly.Location, typeof(FlarePlugin).Assembly.Location, typeof(SolanaPlugin).Assembly.Location),
+                typeof(ArcPlugin).Assembly.Location, typeof(AvalanchePlugin).Assembly.Location, typeof(FlarePlugin).Assembly.Location, typeof(SolanaPlugin).Assembly.Location,
+                typeof(IoTeXPlugin).Assembly.Location),
             ["NEO_JSONRPC_URI"] = neo.Url,
             ["NEOX_JSONRPC_URI"] = neox.Url,
             ["BSC_JSONRPC_URI"] = bsc.Url,
@@ -133,6 +137,7 @@ public class HostTests
             ["ARC_JSONRPC_URI"] = arc.Url,
             ["AVAXC_JSONRPC_URI"] = avalanche.Url,
             ["FLARE_JSONRPC_URI"] = flare.Url,
+            ["IOTEX_JSONRPC_URI"] = iotex.Url,
             ["SOLANA_JSONRPC_URI"] = solana.Url,
         };
         IHost BuildHost() => Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
@@ -157,12 +162,12 @@ public class HostTests
             foreach (var pmi in new[]
                      {
                          "GAS-NEO", "GAS-NEOX", "BNB-BSC", "USDT-BSC", "NEAR-NEAR", "USDC-NEAR", "USDC-ARC", "EURC-ARC", "AVAX-AVAXC", "USDC-AVAXC",
-                         "FLR-FLARE", "FXRP-FLARE", "SOL-SOLANA", "USDC-SOLANA",
+                         "FLR-FLARE", "FXRP-FLARE", "IOTX-IOTEX", "SOL-SOLANA", "USDC-SOLANA",
                      })
                 Assert.True(handlers.TryGetValue(new PaymentMethodId(pmi), out _), $"{pmi} handler not registered");
             Assert.False(handlers.TryGetValue(new PaymentMethodId("USDC-BSC"), out _), "USDC-BSC has no testnet contract and must not be offered");
             Assert.False(handlers.TryGetValue(new PaymentMethodId("USDT-NEAR"), out _), "USDT-NEAR has no testnet contract and must not be offered");
-            foreach (var pmi in new[] { "USDT-AVAXC", "USDT0-FLARE", "USDT-SOLANA" })
+            foreach (var pmi in new[] { "USDT-AVAXC", "USDT0-FLARE", "USDT-IOTEX", "USDT-SOLANA" })
                 Assert.False(handlers.TryGetValue(new PaymentMethodId(pmi), out _), $"{pmi} has no testnet contract and must not be offered");
 
             var address = host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
@@ -197,6 +202,8 @@ public class HostTests
                 new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(AvalanchePool) } });
             await api.UpdateStorePaymentMethod(store.Id, "FLR-FLARE",
                 new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(FlarePool) } });
+            await api.UpdateStorePaymentMethod(store.Id, "IOTX-IOTEX",
+                new UpdatePaymentMethodRequest { Enabled = true, Config = new JObject { ["addresses"] = new JArray(IoTeXPool) } });
             // Solana: a receiving address is a wallet, not one of its token accounts, and for a token its token account must exist.
             foreach (var invalid in new[] { "0x1234567890abcdef1234567890abcdef12345678", solanaShopUsdc, SolanaSpare })
                 await Assert.ThrowsAsync<GreenfieldValidationException>(() => api.UpdateStorePaymentMethod(store.Id, "USDC-SOLANA",
@@ -209,6 +216,7 @@ public class HostTests
             host.Services.GetRequiredService<ChainActivationService<ArcPlugin>>().Invalidate();
             host.Services.GetRequiredService<ChainActivationService<AvalanchePlugin>>().Invalidate();
             host.Services.GetRequiredService<ChainActivationService<FlarePlugin>>().Invalidate();
+            host.Services.GetRequiredService<ChainActivationService<IoTeXPlugin>>().Invalidate();
             host.Services.GetRequiredService<ChainActivationService<SolanaPlugin>>().Invalidate();
             host.Services.GetRequiredService<ChainActivationService<NeoPlugin>>().Invalidate();
             host.Services.GetRequiredService<ChainActivationService<BNBChainPlugin>>().Invalidate();
@@ -235,6 +243,7 @@ public class HostTests
             var arcRpc = host.Services.GetRequiredService<ChainRpcProvider<ArcPlugin>>();
             var avalancheRpc = host.Services.GetRequiredService<ChainRpcProvider<AvalanchePlugin>>();
             var flareRpc = host.Services.GetRequiredService<ChainRpcProvider<FlarePlugin>>();
+            var iotexRpc = host.Services.GetRequiredService<ChainRpcProvider<IoTeXPlugin>>();
             var solanaRpc = host.Services.GetRequiredService<ChainRpcProvider<SolanaPlugin>>();
             await Eventually(async () =>
             {
@@ -251,6 +260,11 @@ public class HostTests
                 await flareRpc.UpdateSummary("FLARE", CancellationToken.None);
                 return flareRpc.IsAvailable("FLARE");
             }, "Flare never became available");
+            await Eventually(async () =>
+            {
+                await iotexRpc.UpdateSummary("IOTEX", CancellationToken.None);
+                return iotexRpc.IsAvailable("IOTEX");
+            }, "IoTeX never became available");
             await Eventually(async () =>
             {
                 await solanaRpc.UpdateSummary("SOLANA", CancellationToken.None);
@@ -392,6 +406,20 @@ public class HostTests
             var flarePayment = Assert.Single((await api.GetInvoicePaymentMethods(flareInvoice.Id)).Single().Payments);
             Assert.Equal(2000m, flarePayment.Value);
             Assert.StartsWith(flareTx!, flarePayment.Id);
+
+            // IoTeX: the chain's coin, a plain transfer as IoTeX's own wallets send it, read from the block and its receipt,
+            // final two blocks later.
+            var iotexInvoice = await CreateInvoice(api, store.Id, "IOTX-IOTEX", "IOTX", 250m);
+            var iotexPrompt = Assert.Single(await api.GetInvoicePaymentMethods(iotexInvoice.Id));
+            Assert.Contains(iotexPrompt.Destination, IoTeXPool);
+            Assert.Equal($"ethereum:{iotexPrompt.Destination}@4690?value=250000000000000000000", iotexPrompt.PaymentLink);
+            iotex.AddBlock(out var iotexTx, EvmPayer, iotexPrompt.Destination, BigInteger.Parse("250000000000000000000"));
+            Assert.Equal(InvoiceStatus.New, (await api.GetInvoice(iotexInvoice.Id)).Status);   // not final yet
+            iotex.AddBlocks(2);
+            await Eventually(async () => (await api.GetInvoice(iotexInvoice.Id)).Status == InvoiceStatus.Settled, "the IoTeX invoice did not settle");
+            var iotexPayment = Assert.Single((await api.GetInvoicePaymentMethods(iotexInvoice.Id)).Single().Payments);
+            Assert.Equal(250m, iotexPayment.Value);
+            Assert.StartsWith(iotexTx!, iotexPayment.Id);
 
             // Solana: two open invoices share the store's one address; each carries its own Solana Pay reference.
             var solInvoice = await CreateInvoice(api, store.Id, "SOL-SOLANA", "SOL", 1.5m);
